@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      UserRole @default(USER)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  archivesCreated   Archive[]
+  signaturesIssued  ArchiveSignature[] @relation("SignedBy")
+  signaturesRevoked ArchiveSignature[] @relation("RevokedBy")
+  auditLogs         AuditLog[]
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+model OrganizationProfile {
+  id            String   @id @default("default")
+  name          String   @default("Organization Name")
+  shortName     String?
+  tagline       String?
+  address       String?
+  website       String?
+  logoUrl       String?
+  primaryColor  String   @default("#0f766e")
+  verifyBaseUrl String?
+  setupComplete Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+}
+
+model Signatory {
+  id         String   @id @default(cuid())
+  name       String
+  position   String
+  unit       String?
+  nip        String?
+  active     Boolean  @default(true)
+  deletedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  signatures ArchiveSignature[]
+}
+
+model Archive {
+  id          String   @id @default(cuid())
+  number      String
+  subject     String
+  description String?
+  issuedAt    DateTime
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  signature ArchiveSignature?
+}
+
+model ArchiveSignature {
+  id                String   @id @default(cuid())
+  archiveId         String   @unique
+  archive           Archive  @relation(fields: [archiveId], references: [id], onDelete: Cascade)
+  signatoryId       String
+  signatory         Signatory @relation(fields: [signatoryId], references: [id])
+  signatoryName     String
+  signatoryPosition String
+  signatoryUnit     String?
+  token             String   @unique
+  hmac              String
+  signedById        String
+  signedBy          User     @relation("SignedBy", fields: [signedById], references: [id])
+  signedAt          DateTime @default(now())
+  revokedAt         DateTime?
+  revokedReason     String?
+  revokedById       String?
+  revokedBy         User?    @relation("RevokedBy", fields: [revokedById], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  entityType String
+  entityId   String
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
