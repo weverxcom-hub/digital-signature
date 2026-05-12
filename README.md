@@ -11,6 +11,10 @@ their authenticity.
 > via a public verification URL on **your own** domain. Anyone can scan the QR
 > printed on the document and confirm authenticity against your domain.
 
+📖 **Untuk panduan penggunaan harian (Bahasa Indonesia)**, lihat
+[`docs/PANDUAN.md`](docs/PANDUAN.md). Ini sumber resmi panduan — bisa di-edit
+langsung di GitHub kapan saja.
+
 ## Features
 
 - **Organization profile**: name, short name, tagline, logo URL, primary
