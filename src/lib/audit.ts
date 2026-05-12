@@ -1,0 +1,33 @@
+import { prisma } from "./prisma";
+
+export type AuditAction =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "SIGN"
+  | "SIGN_REVOKE"
+  | "LOGIN"
+  | "PROFILE_UPDATE"
+  | "USER_CREATE";
+
+export async function logAudit(params: {
+  action: AuditAction;
+  entityType: string;
+  entityId: string;
+  userId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  try {
+    await prisma.auditLog.create({
+      data: {
+        action: params.action,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        userId: params.userId ?? null,
+        metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+      },
+    });
+  } catch (err) {
+    console.error("[audit] failed to record audit log", err);
+  }
+}
