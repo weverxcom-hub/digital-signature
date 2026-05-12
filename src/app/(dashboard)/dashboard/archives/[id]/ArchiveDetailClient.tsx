@@ -390,7 +390,7 @@ export function ArchiveDetailClient({
                       download={`qr-${archive.number}.png`}
                     >
                       <Button size="sm" variant="outline">
-                        Download PNG
+                        Download QR (PNG)
                       </Button>
                     </a>
                     <a
@@ -398,7 +398,7 @@ export function ArchiveDetailClient({
                       download={`qr-${archive.number}.svg`}
                     >
                       <Button size="sm" variant="outline">
-                        Download SVG
+                        Download QR (SVG)
                       </Button>
                     </a>
                     <a href={verifyUrl} target="_blank" rel="noreferrer">
@@ -415,6 +415,38 @@ export function ArchiveDetailClient({
               )}
             </CardContent>
           </Card>
+
+          {isSigned && verifyUrl && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Visualisasi tanda tangan</CardTitle>
+                <CardDescription>
+                  Composite image (QR + signatory text). Paste onto the
+                  PDF/Word version of your document where the wet signature
+                  would normally go.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`/api/archives/${archive.id}/stamp`}
+                    alt="Signature visualization"
+                    className="h-auto w-full"
+                  />
+                </div>
+                <a
+                  href={`/api/archives/${archive.id}/stamp`}
+                  download={`stamp-${archive.number}.png`}
+                  className="block"
+                >
+                  <Button size="sm" className="w-full">
+                    Download visualisasi (PNG)
+                  </Button>
+                </a>
+              </CardContent>
+            </Card>
+          )}
 
           {profile.logoUrl && (
             <Card>

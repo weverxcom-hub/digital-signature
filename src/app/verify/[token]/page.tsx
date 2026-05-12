@@ -168,7 +168,11 @@ export default async function VerifyPage({
           ) : null}
           <p className="mt-2">
             This page is the official verification endpoint for documents
-            signed via {profile.name}.
+            signed via {profile.name}.{" "}
+            <Link href="/about" className="underline hover:text-slate-700">
+              Pelajari cara kerjanya
+            </Link>
+            .
           </p>
         </footer>
       </div>

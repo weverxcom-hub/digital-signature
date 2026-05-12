@@ -21,6 +21,7 @@ export default async function DashboardLayout({
     { href: "/dashboard/signatories", label: "Signatories" },
     { href: "/dashboard/profile", label: "Organization Profile" },
     { href: "/dashboard/audit", label: "Audit Log" },
+    { href: "/dashboard/help", label: "Panduan" },
   ];
 
   return (
