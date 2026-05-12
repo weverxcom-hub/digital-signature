@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -98,7 +98,7 @@ model AuditLog {
   entityId   String
   userId     String?
   user       User?    @relation(fields: [userId], references: [id])
-  metadata   String?
+  metadata   Json?
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
