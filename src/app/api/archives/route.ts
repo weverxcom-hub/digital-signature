@@ -29,7 +29,7 @@ export async function GET(req: Request) {
         }
       : undefined,
     include: {
-      signature: {
+      signatures: {
         select: {
           id: true,
           token: true,
@@ -38,6 +38,7 @@ export async function GET(req: Request) {
           signatoryName: true,
           signatoryPosition: true,
         },
+        orderBy: { signedAt: "desc" },
       },
       createdBy: { select: { id: true, name: true, email: true } },
     },

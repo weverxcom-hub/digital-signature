@@ -8,7 +8,7 @@ export default async function ArchivesPage() {
   const [archives, signatories] = await Promise.all([
     prisma.archive.findMany({
       include: {
-        signature: {
+        signatures: {
           select: {
             id: true,
             token: true,
@@ -17,6 +17,7 @@ export default async function ArchivesPage() {
             signatoryName: true,
             signatoryPosition: true,
           },
+          orderBy: { signedAt: "desc" },
         },
       },
       orderBy: { createdAt: "desc" },

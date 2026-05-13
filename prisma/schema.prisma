@@ -29,6 +29,13 @@ enum UserRole {
   USER
 }
 
+enum ArchiveStatus {
+  DRAFT
+  PENDING
+  FULLY_SIGNED
+  REVOKED
+}
+
 model OrganizationProfile {
   id            String   @id @default("default")
   name          String   @default("Organization Name")
@@ -58,22 +65,25 @@ model Signatory {
 }
 
 model Archive {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   number      String
   subject     String
   description String?
   issuedAt    DateTime
+  status      ArchiveStatus @default(DRAFT)
   createdById String
-  createdBy   User     @relation(fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  signature ArchiveSignature?
+  signatures ArchiveSignature[]
+
+  @@index([status])
 }
 
 model ArchiveSignature {
   id                String   @id @default(cuid())
-  archiveId         String   @unique
+  archiveId         String
   archive           Archive  @relation(fields: [archiveId], references: [id], onDelete: Cascade)
   signatoryId       String
   signatory         Signatory @relation(fields: [signatoryId], references: [id])
@@ -89,6 +99,9 @@ model ArchiveSignature {
   revokedReason     String?
   revokedById       String?
   revokedBy         User?    @relation("RevokedBy", fields: [revokedById], references: [id])
+
+  @@index([archiveId])
+  @@index([archiveId, revokedAt])
 }
 
 model AuditLog {
