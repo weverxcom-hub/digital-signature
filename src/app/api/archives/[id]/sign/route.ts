@@ -5,6 +5,7 @@ import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { computeSignatureHmac, generateSignatureToken } from "@/lib/signature";
+import { deriveArchiveStatus } from "@/lib/archiveSignature";
 
 const signSchema = z.object({
   signatoryId: z.string().min(1),
@@ -26,12 +27,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const archive = await prisma.archive.findUnique({
     where: { id: params.id },
-    include: { signature: true },
+    include: { signatures: true },
   });
   if (!archive) {
     return NextResponse.json({ error: "Archive not found" }, { status: 404 });
   }
-  if (archive.signature && !archive.signature.revokedAt) {
+  // Preserve single-signer behaviour at MVP: block while any active
+  // signature exists. Schema supports 1:N for the future.
+  const hasActiveSignature = archive.signatures.some((s) => !s.revokedAt);
+  if (hasActiveSignature) {
     return NextResponse.json(
       { error: "This archive is already signed. Revoke the existing signature first." },
       { status: 409 }
@@ -45,10 +49,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       { error: "Signatory not found or inactive" },
       { status: 400 }
     );
-  }
-
-  if (archive.signature?.revokedAt) {
-    await prisma.archiveSignature.delete({ where: { id: archive.signature.id } });
   }
 
   const token = generateSignatureToken();
@@ -78,6 +78,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       hmac,
       signedById: session.user.id,
       signedAt,
+    },
+  });
+
+  await prisma.archive.update({
+    where: { id: archive.id },
+    data: {
+      status: deriveArchiveStatus([...archive.signatures, signature]),
     },
   });
 

@@ -19,13 +19,17 @@ import { formatDate, formatDateTime } from "@/lib/utils";
 type Signature = {
   id: string;
   token: string;
+  hmac: string;
+  signatoryId: string;
   signatoryName: string;
   signatoryPosition: string;
   signatoryUnit: string | null;
   signedAt: string;
   revokedAt: string | null;
   revokedReason: string | null;
-} | null;
+};
+
+type ArchiveStatus = "DRAFT" | "PENDING" | "FULLY_SIGNED" | "REVOKED";
 
 type Archive = {
   id: string;
@@ -33,8 +37,9 @@ type Archive = {
   subject: string;
   description: string | null;
   issuedAt: string;
+  status: ArchiveStatus;
   createdBy: { id: string; name: string; email: string };
-  signature: Signature;
+  signatures: Signature[];
 };
 
 type Signatory = { id: string; name: string; position: string };
@@ -72,7 +77,14 @@ export function ArchiveDetailClient({
     issuedAt: archive.issuedAt.slice(0, 10),
   });
 
-  const isSigned = !!archive.signature && !archive.signature.revokedAt;
+  // Multi-signer support landed in the schema, but UX still shows a single
+  // "primary" signature: most-recent active, else most-recent revoked.
+  const sortedSignatures = [...archive.signatures].sort(
+    (a, b) => +new Date(b.signedAt) - +new Date(a.signedAt)
+  );
+  const activeSignature = sortedSignatures.find((s) => !s.revokedAt) ?? null;
+  const primarySignature = activeSignature ?? sortedSignatures[0] ?? null;
+  const isSigned = !!activeSignature;
 
   async function sign() {
     if (!selectedSignatory) {
@@ -151,11 +163,13 @@ export function ArchiveDetailClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {archive.signature?.revokedAt && (
+          {isSigned && <Badge variant="success">signed</Badge>}
+          {!isSigned && primarySignature?.revokedAt && (
             <Badge variant="danger">revoked</Badge>
           )}
-          {isSigned && <Badge variant="success">signed</Badge>}
-          {!archive.signature && <Badge variant="default">draft</Badge>}
+          {archive.signatures.length === 0 && (
+            <Badge variant="default">draft</Badge>
+          )}
         </div>
       </div>
 
@@ -266,7 +280,7 @@ export function ArchiveDetailClient({
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {!archive.signature && (
+              {!primarySignature && (
                 <div className="space-y-3">
                   {signatories.length === 0 ? (
                     <p className="text-sm text-amber-700">
@@ -296,38 +310,38 @@ export function ArchiveDetailClient({
                 </div>
               )}
 
-              {archive.signature && (
+              {primarySignature && (
                 <div className="space-y-3">
                   <dl className="grid gap-3 text-sm md:grid-cols-2">
                     <Field label="Signatory">
-                      {archive.signature.signatoryName}
+                      {primarySignature.signatoryName}
                     </Field>
                     <Field label="Position">
-                      {archive.signature.signatoryPosition}
+                      {primarySignature.signatoryPosition}
                     </Field>
-                    {archive.signature.signatoryUnit && (
+                    {primarySignature.signatoryUnit && (
                       <Field label="Unit">
-                        {archive.signature.signatoryUnit}
+                        {primarySignature.signatoryUnit}
                       </Field>
                     )}
                     <Field label="Signed at">
-                      {formatDateTime(archive.signature.signedAt)}
+                      {formatDateTime(primarySignature.signedAt)}
                     </Field>
                     <Field label="Token" wide>
                       <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
-                        {archive.signature.token}
+                        {primarySignature.token}
                       </code>
                     </Field>
                   </dl>
-                  {archive.signature.revokedAt ? (
+                  {primarySignature.revokedAt ? (
                     <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                       <p className="font-medium">
                         Revoked on{" "}
-                        {formatDateTime(archive.signature.revokedAt)}
+                        {formatDateTime(primarySignature.revokedAt)}
                       </p>
-                      {archive.signature.revokedReason && (
+                      {primarySignature.revokedReason && (
                         <p className="mt-1">
-                          Reason: {archive.signature.revokedReason}
+                          Reason: {primarySignature.revokedReason}
                         </p>
                       )}
                     </div>
