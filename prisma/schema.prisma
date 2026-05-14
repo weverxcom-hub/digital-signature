@@ -61,7 +61,8 @@ model Signatory {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  signatures ArchiveSignature[]
+  signatures        ArchiveSignature[]
+  requiredFor       ArchiveRequiredSignatory[]
 }
 
 model Archive {
@@ -76,9 +77,23 @@ model Archive {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  signatures ArchiveSignature[]
+  signatures          ArchiveSignature[]
+  requiredSignatories ArchiveRequiredSignatory[]
 
   @@index([status])
+}
+
+model ArchiveRequiredSignatory {
+  id          String    @id @default(cuid())
+  archiveId   String
+  archive     Archive   @relation(fields: [archiveId], references: [id], onDelete: Cascade)
+  signatoryId String
+  signatory   Signatory @relation(fields: [signatoryId], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@unique([archiveId, signatoryId])
+  @@index([archiveId])
+  @@index([signatoryId])
 }
 
 model ArchiveSignature {

@@ -1,15 +1,15 @@
 import type { ArchiveStatus } from "@prisma/client";
 
 /**
- * Multi-signer support landed in the schema, but most UI/API surfaces still
- * expose a single "primary" signature per archive. These helpers pick that
- * primary signature consistently and derive the archive's overall status
- * from its signatures.
+ * Helpers for the multi-signer schema. They keep the single-signer UX
+ * working (pickPrimarySignature) and derive the archive-level status
+ * from its current signatures and the optional required-signer set.
  */
 
 export type SigLike = {
   revokedAt: Date | string | null;
   signedAt: Date | string;
+  signatoryId?: string;
 };
 
 /**
@@ -32,12 +32,55 @@ export function pickPrimarySignature<T extends SigLike>(
 }
 
 /**
- * Compute the archive-level status from its signatures.
- * The `PENDING` state is reserved for a future "required signers" feature;
- * at MVP every signed archive resolves to either FULLY_SIGNED or REVOKED.
+ * Compute the archive-level status from its signatures and required-signer
+ * set.
+ *
+ * Without any required signers (the legacy single-signer semantics):
+ *   - no signatures             -> DRAFT
+ *   - any non-revoked signature -> FULLY_SIGNED
+ *   - has signatures, all revoked -> REVOKED
+ *
+ * With one or more required signers:
+ *   - every required signatory has an active signature -> FULLY_SIGNED
+ *   - every required signatory has a revoked signature AND no active
+ *     signature exists                                 -> REVOKED
+ *   - anything else (never signed, partial, in progress) -> PENDING
  */
-export function deriveArchiveStatus(signatures: SigLike[]): ArchiveStatus {
-  if (!signatures.length) return "DRAFT";
-  const hasActive = signatures.some((s) => !s.revokedAt);
-  return hasActive ? "FULLY_SIGNED" : "REVOKED";
+export function deriveArchiveStatus(
+  signatures: SigLike[],
+  requiredSignatoryIds: string[] = []
+): ArchiveStatus {
+  const activeSignatoryIds = new Set(
+    signatures
+      .filter((s) => !s.revokedAt)
+      .map((s) => s.signatoryId)
+      .filter((v): v is string => typeof v === "string" && v.length > 0)
+  );
+
+  if (requiredSignatoryIds.length === 0) {
+    if (signatures.length === 0) return "DRAFT";
+    return activeSignatoryIds.size > 0 ? "FULLY_SIGNED" : "REVOKED";
+  }
+
+  const allRequiredActive = requiredSignatoryIds.every((id) =>
+    activeSignatoryIds.has(id)
+  );
+  if (allRequiredActive) return "FULLY_SIGNED";
+
+  // No active signatures left at all? Distinguish "REVOKED across the
+  // board" from "still in progress".
+  if (activeSignatoryIds.size === 0 && signatures.length > 0) {
+    const revokedSignatoryIds = new Set(
+      signatures
+        .filter((s) => !!s.revokedAt)
+        .map((s) => s.signatoryId)
+        .filter((v): v is string => typeof v === "string" && v.length > 0)
+    );
+    const allRequiredOnceSigned = requiredSignatoryIds.every((id) =>
+      revokedSignatoryIds.has(id)
+    );
+    if (allRequiredOnceSigned) return "REVOKED";
+  }
+
+  return "PENDING";
 }

@@ -27,17 +27,25 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const archive = await prisma.archive.findUnique({
     where: { id: params.id },
-    include: { signatures: true },
+    include: {
+      signatures: true,
+      requiredSignatories: { select: { signatoryId: true } },
+    },
   });
   if (!archive) {
     return NextResponse.json({ error: "Archive not found" }, { status: 404 });
   }
-  // Preserve single-signer behaviour at MVP: block while any active
-  // signature exists. Schema supports 1:N for the future.
-  const hasActiveSignature = archive.signatures.some((s) => !s.revokedAt);
-  if (hasActiveSignature) {
+  // Idempotency guard: the same signatory cannot have two active
+  // signatures on the same archive. Re-signing requires revoking first.
+  const hasActiveDuplicate = archive.signatures.some(
+    (s) => s.signatoryId === parsed.data.signatoryId && !s.revokedAt
+  );
+  if (hasActiveDuplicate) {
     return NextResponse.json(
-      { error: "This archive is already signed. Revoke the existing signature first." },
+      {
+        error:
+          "This signatory already has an active signature on this archive. Revoke it before re-signing.",
+      },
       { status: 409 }
     );
   }
@@ -81,10 +89,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     },
   });
 
+  const requiredIds = archive.requiredSignatories.map((r) => r.signatoryId);
   await prisma.archive.update({
     where: { id: archive.id },
     data: {
-      status: deriveArchiveStatus([...archive.signatures, signature]),
+      status: deriveArchiveStatus(
+        [...archive.signatures, signature],
+        requiredIds
+      ),
     },
   });
 

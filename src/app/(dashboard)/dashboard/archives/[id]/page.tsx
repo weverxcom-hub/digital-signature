@@ -17,6 +17,14 @@ export default async function ArchiveDetailPage({
       where: { id: params.id },
       include: {
         signatures: { orderBy: { signedAt: "desc" } },
+        requiredSignatories: {
+          orderBy: { createdAt: "asc" },
+          include: {
+            signatory: {
+              select: { id: true, name: true, position: true, unit: true },
+            },
+          },
+        },
         createdBy: { select: { id: true, name: true, email: true } },
       },
     }),
