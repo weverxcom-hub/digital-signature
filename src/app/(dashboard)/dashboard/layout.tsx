@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
-import Image from "next/image";
 import Link from "next/link";
 import { authOptions } from "@/lib/auth";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
+import { LogoMark } from "@/components/LogoMark";
 import { SignOutButton } from "./SignOutButton";
 
 export default async function DashboardLayout({
@@ -29,23 +29,7 @@ export default async function DashboardLayout({
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
-            {profile.logoUrl ? (
-              <Image
-                src={profile.logoUrl}
-                alt={profile.name}
-                width={36}
-                height={36}
-                className="h-9 w-9 rounded object-contain"
-                unoptimized
-              />
-            ) : (
-              <div
-                className="flex h-9 w-9 items-center justify-center rounded text-sm font-semibold text-white"
-                style={{ backgroundColor: "var(--brand)" }}
-              >
-                {(profile.shortName?.slice(0, 2) || profile.name.slice(0, 2)).toUpperCase()}
-              </div>
-            )}
+            <LogoMark profile={profile} size={36} rounded="md" />
             <div className="leading-tight">
               <p className="text-sm font-semibold">{profile.name}</p>
               <p className="text-xs text-slate-500">Digital Signature</p>
