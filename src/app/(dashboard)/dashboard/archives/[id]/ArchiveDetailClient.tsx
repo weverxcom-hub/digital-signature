@@ -90,6 +90,16 @@ export function ArchiveDetailClient({
     description: archive.description ?? "",
     issuedAt: archive.issuedAt.slice(0, 10),
   });
+  // PDF embed state — admin uploads a PDF, server returns the stamped PDF as
+  // a download. Nothing is persisted server-side (option (a) in the plan).
+  const [embedFile, setEmbedFile] = useState<File | null>(null);
+  const [embedPage, setEmbedPage] = useState<"last" | "first" | "all">(
+    "last"
+  );
+  const [embedCorner, setEmbedCorner] = useState<
+    "top-left" | "top-right" | "bottom-left" | "bottom-right"
+  >("bottom-right");
+  const [embedBusy, setEmbedBusy] = useState(false);
 
   const sortedSignatures = useMemo(
     () =>
@@ -181,6 +191,53 @@ export function ArchiveDetailClient({
     }
     toast.success("Signature revoked");
     router.refresh();
+  }
+
+  async function embedPdf() {
+    if (!embedFile) {
+      toast.error("Choose a PDF file first");
+      return;
+    }
+    if (!previewSignature || previewSignature.revokedAt) {
+      toast.error("Pick an active signature to embed first");
+      return;
+    }
+    setEmbedBusy(true);
+    try {
+      const data = new FormData();
+      data.append("file", embedFile);
+      data.append("signatureId", previewSignature.id);
+      data.append("page", embedPage);
+      data.append("corner", embedCorner);
+      const res = await fetch(`/api/archives/${archive.id}/embed-pdf`, {
+        method: "POST",
+        body: data,
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        toast.error(payload?.error || "Could not embed stamp into PDF");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const fromHeader = res.headers
+        .get("Content-Disposition")
+        ?.match(/filename="([^"]+)"/)?.[1];
+      a.download =
+        fromHeader ||
+        `signed-${archive.number}-${embedFile.name.replace(/\.[^.]+$/, "")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Stamped PDF downloaded");
+    } catch {
+      toast.error("Could not embed stamp into PDF");
+    } finally {
+      setEmbedBusy(false);
+    }
   }
 
   async function saveEdits() {
@@ -503,6 +560,90 @@ export function ArchiveDetailClient({
               )}
             </CardContent>
           </Card>
+
+          {showPreview && previewSignature && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Tempel stamp ke PDF</CardTitle>
+                <CardDescription>
+                  Upload PDF dokumen aslimu. Sistem akan menempelkan QR +
+                  visualisasi tanda tangan ke halaman yang kamu pilih dan
+                  langsung mengirim PDF hasilnya untuk diunduh. PDF tidak
+                  disimpan di server.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="embedFile">PDF source (max 10 MB)</Label>
+                  <Input
+                    id="embedFile"
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) =>
+                      setEmbedFile(e.target.files?.[0] ?? null)
+                    }
+                  />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <Label htmlFor="embedPage">Page</Label>
+                    <select
+                      id="embedPage"
+                      className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+                      value={embedPage}
+                      onChange={(e) =>
+                        setEmbedPage(
+                          e.target.value as "last" | "first" | "all"
+                        )
+                      }
+                    >
+                      <option value="last">Last page</option>
+                      <option value="first">First page</option>
+                      <option value="all">All pages</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="embedCorner">Corner</Label>
+                    <select
+                      id="embedCorner"
+                      className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+                      value={embedCorner}
+                      onChange={(e) =>
+                        setEmbedCorner(
+                          e.target.value as
+                            | "top-left"
+                            | "top-right"
+                            | "bottom-left"
+                            | "bottom-right"
+                        )
+                      }
+                    >
+                      <option value="bottom-right">Bottom-right</option>
+                      <option value="bottom-left">Bottom-left</option>
+                      <option value="top-right">Top-right</option>
+                      <option value="top-left">Top-left</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Using signature:{" "}
+                  <span className="font-medium text-slate-700">
+                    {previewSignature.signatoryName}
+                  </span>
+                  {" \u00b7 "}
+                  {previewSignature.signatoryPosition}
+                  {activeSignatures.length > 1 &&
+                    " (change in the QR card above)"}
+                </p>
+                <Button
+                  onClick={embedPdf}
+                  disabled={embedBusy || !embedFile}
+                >
+                  {embedBusy ? "Embedding\u2026" : "Embed & download"}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-6">

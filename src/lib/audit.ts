@@ -7,6 +7,7 @@ export type AuditAction =
   | "DELETE"
   | "SIGN"
   | "SIGN_REVOKE"
+  | "EMBED_PDF"
   | "LOGIN"
   | "PROFILE_UPDATE"
   | "USER_CREATE";
