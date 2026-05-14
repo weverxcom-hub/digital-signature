@@ -1,5 +1,15 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Ensure the bundled stamp fonts ship with the serverless functions
+  // that render PNG stamps (QR + signature visualization). Next.js
+  // tracing follows literal fs.readFileSync paths reasonably well, but
+  // we build the path with path.join(process.cwd(), …) so we list the
+  // assets explicitly to be safe across Vercel runtime versions.
+  outputFileTracingIncludes: {
+    "/api/archives/[id]/stamp": ["./public/fonts/**"],
+    "/api/archives/[id]/qr": ["./public/fonts/**"],
+    "/api/archives/[id]/embed-pdf": ["./public/fonts/**"],
+  },
   images: {
     // The dashboard now serves the org logo as an uploaded file via
     // /api/profile/logo, but the legacy `logoUrl` (external image) is

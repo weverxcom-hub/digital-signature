@@ -4,7 +4,10 @@ import { PDFDocument } from "pdf-lib";
 import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildVerifyUrl } from "@/lib/signature";
-import { getOrCreateOrganizationProfile } from "@/lib/profile";
+import {
+  DEFAULT_PROFILE_ID,
+  getOrCreateOrganizationProfile,
+} from "@/lib/profile";
 import { renderSignatureStamp } from "@/lib/stamp";
 import { pickPrimarySignature } from "@/lib/archiveSignature";
 import { logAudit } from "@/lib/audit";
@@ -126,6 +129,19 @@ export async function POST(
   const profile = await getOrCreateOrganizationProfile();
   const verifyUrl = buildVerifyUrl(signature.token, profile.verifyBaseUrl);
 
+  // Fetch the raw logo bytes (skipped in the cached profile select set)
+  // so the embedded QR carries the org logo in its center.
+  const logoRow = profile.logoMimeType
+    ? await prisma.organizationProfile.findUnique({
+        where: { id: DEFAULT_PROFILE_ID },
+        select: { logoBytes: true, logoMimeType: true },
+      })
+    : null;
+  const qrLogo =
+    logoRow?.logoBytes && logoRow.logoMimeType
+      ? { bytes: logoRow.logoBytes, mimeType: logoRow.logoMimeType }
+      : null;
+
   const stampPng = await renderSignatureStamp({
     verifyUrl,
     signatoryName: signature.signatoryName,
@@ -134,6 +150,7 @@ export async function POST(
     organizationName: profile.name,
     footerLine1: `Dokumen ini ditandatangani secara elektronik oleh ${profile.name}.`,
     footerLine2: `Pindai QR untuk verifikasi di ${stripScheme(verifyUrl)}.`,
+    qrLogo,
   });
 
   let pdfDoc: PDFDocument;

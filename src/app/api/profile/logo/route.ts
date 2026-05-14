@@ -24,29 +24,54 @@ export const dynamic = "force-dynamic";
  * Stream the uploaded logo bytes. Anonymous endpoint — the logo is visible
  * on every public page anyway. Cached aggressively so the dashboard and
  * /verify pages can reuse it across navigations.
+ *
+ * Supports conditional GET via `If-Modified-Since` so revisits return 304
+ * (header-only, no body, no DB read of `logoBytes`). This noticeably cuts
+ * the loading-screen flicker on slow connections.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  // Cheap header-only probe first so we can serve 304 / 404 without
+  // pulling the binary bytes off the row.
+  const meta = await prisma.organizationProfile.findUnique({
+    where: { id: DEFAULT_PROFILE_ID },
+    select: { logoMimeType: true, logoUpdatedAt: true },
+  });
+  if (!meta || !meta.logoMimeType || !meta.logoUpdatedAt) {
+    return new NextResponse("Not found", {
+      status: 404,
+      headers: { "Cache-Control": "public, max-age=60" },
+    });
+  }
+
+  const lastModified = meta.logoUpdatedAt.toUTCString();
+  const ifModifiedSince = req.headers.get("if-modified-since");
+  if (ifModifiedSince && ifModifiedSince === lastModified) {
+    return new NextResponse(null, {
+      status: 304,
+      headers: {
+        "Last-Modified": lastModified,
+        "Cache-Control": "public, max-age=86400, must-revalidate",
+      },
+    });
+  }
+
   const row = await prisma.organizationProfile.findUnique({
     where: { id: DEFAULT_PROFILE_ID },
-    select: {
-      logoBytes: true,
-      logoMimeType: true,
-      logoUpdatedAt: true,
-    },
+    select: { logoBytes: true },
   });
-  if (!row || !row.logoBytes || !row.logoMimeType) {
+  if (!row?.logoBytes) {
     return new NextResponse("Not found", { status: 404 });
   }
   const buf = Buffer.from(row.logoBytes);
   return new NextResponse(buf, {
     status: 200,
     headers: {
-      "Content-Type": row.logoMimeType,
+      "Content-Type": meta.logoMimeType,
       "Content-Length": String(buf.byteLength),
       // 1 day in the browser; ?v=<timestamp> on the client busts the cache
       // whenever the admin uploads a new logo.
       "Cache-Control": "public, max-age=86400, must-revalidate",
-      "Last-Modified": (row.logoUpdatedAt ?? new Date()).toUTCString(),
+      "Last-Modified": lastModified,
     },
   });
 }
