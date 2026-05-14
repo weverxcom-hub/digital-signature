@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { LogoMark } from "@/components/LogoMark";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Textarea } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
@@ -60,6 +60,8 @@ type Profile = {
   name: string;
   shortName: string | null;
   logoUrl: string | null;
+  logoMimeType: string | null;
+  logoUpdatedAt: string | null;
   primaryColor: string;
 };
 
@@ -760,7 +762,7 @@ export function ArchiveDetailClient({
             </Card>
           )}
 
-          {profile.logoUrl && (
+          {(profile.logoUrl || profile.logoMimeType) && (
             <Card>
               <CardHeader>
                 <CardTitle>Branding preview</CardTitle>
@@ -769,14 +771,7 @@ export function ArchiveDetailClient({
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center gap-3">
-                <Image
-                  src={profile.logoUrl}
-                  alt={profile.name}
-                  width={48}
-                  height={48}
-                  className="h-12 w-12 rounded object-contain"
-                  unoptimized
-                />
+                <LogoMark profile={profile} size={48} />
                 <div>
                   <p className="font-medium">{profile.name}</p>
                   <p className="text-xs text-slate-500">

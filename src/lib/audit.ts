@@ -10,6 +10,8 @@ export type AuditAction =
   | "EMBED_PDF"
   | "LOGIN"
   | "PROFILE_UPDATE"
+  | "PROFILE_LOGO_UPLOAD"
+  | "PROFILE_LOGO_REMOVE"
   | "USER_CREATE";
 
 export async function logAudit(params: {

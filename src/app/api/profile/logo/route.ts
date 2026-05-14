@@ -1,0 +1,159 @@
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions, isAdmin } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { DEFAULT_PROFILE_ID } from "@/lib/profile";
+import { logAudit } from "@/lib/audit";
+
+// Max upload size for the organization logo. Logos are decorative and small
+// (typically <50KB); a 2MB ceiling is generous and protects the DB row.
+const MAX_LOGO_BYTES = 2 * 1024 * 1024;
+
+const ALLOWED_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/svg+xml",
+  "image/gif",
+]);
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * Stream the uploaded logo bytes. Anonymous endpoint — the logo is visible
+ * on every public page anyway. Cached aggressively so the dashboard and
+ * /verify pages can reuse it across navigations.
+ */
+export async function GET() {
+  const row = await prisma.organizationProfile.findUnique({
+    where: { id: DEFAULT_PROFILE_ID },
+    select: {
+      logoBytes: true,
+      logoMimeType: true,
+      logoUpdatedAt: true,
+    },
+  });
+  if (!row || !row.logoBytes || !row.logoMimeType) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+  const buf = Buffer.from(row.logoBytes);
+  return new NextResponse(buf, {
+    status: 200,
+    headers: {
+      "Content-Type": row.logoMimeType,
+      "Content-Length": String(buf.byteLength),
+      // 1 day in the browser; ?v=<timestamp> on the client busts the cache
+      // whenever the admin uploads a new logo.
+      "Cache-Control": "public, max-age=86400, must-revalidate",
+      "Last-Modified": (row.logoUpdatedAt ?? new Date()).toUTCString(),
+    },
+  });
+}
+
+/**
+ * Replace the uploaded logo. Multipart form with a single `file` field.
+ * Admin-only. Validates content type + size before writing.
+ */
+export async function POST(req: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user || !isAdmin(session.user.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return NextResponse.json(
+      { error: "Expected multipart/form-data" },
+      { status: 400 }
+    );
+  }
+  const file = form.get("file");
+  if (!file || typeof file === "string") {
+    return NextResponse.json({ error: "Missing file" }, { status: 400 });
+  }
+  if (!ALLOWED_MIME.has(file.type)) {
+    return NextResponse.json(
+      {
+        error: `Unsupported image type "${file.type}". Use PNG, JPG, WEBP, SVG, or GIF.`,
+      },
+      { status: 400 }
+    );
+  }
+  if (file.size > MAX_LOGO_BYTES) {
+    return NextResponse.json(
+      {
+        error: `File too large (${(file.size / 1024).toFixed(0)}KB). Max ${MAX_LOGO_BYTES / 1024}KB.`,
+      },
+      { status: 400 }
+    );
+  }
+  if (file.size === 0) {
+    return NextResponse.json({ error: "Empty file" }, { status: 400 });
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const now = new Date();
+
+  await prisma.organizationProfile.upsert({
+    where: { id: DEFAULT_PROFILE_ID },
+    update: {
+      logoBytes: bytes,
+      logoMimeType: file.type,
+      logoUpdatedAt: now,
+    },
+    create: {
+      id: DEFAULT_PROFILE_ID,
+      logoBytes: bytes,
+      logoMimeType: file.type,
+      logoUpdatedAt: now,
+    },
+  });
+
+  await logAudit({
+    action: "PROFILE_LOGO_UPLOAD",
+    entityType: "OrganizationProfile",
+    entityId: DEFAULT_PROFILE_ID,
+    userId: session.user.id,
+    metadata: { mimeType: file.type, size: file.size },
+  });
+
+  return NextResponse.json({
+    ok: true,
+    mimeType: file.type,
+    size: file.size,
+    updatedAt: now.toISOString(),
+  });
+}
+
+/**
+ * Remove the uploaded logo. The external `logoUrl` field is untouched —
+ * removing the upload simply falls back to that URL (if set) or the
+ * text-initial placeholder.
+ */
+export async function DELETE() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user || !isAdmin(session.user.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  await prisma.organizationProfile.update({
+    where: { id: DEFAULT_PROFILE_ID },
+    data: {
+      logoBytes: null,
+      logoMimeType: null,
+      logoUpdatedAt: null,
+    },
+  });
+
+  await logAudit({
+    action: "PROFILE_LOGO_REMOVE",
+    entityType: "OrganizationProfile",
+    entityId: DEFAULT_PROFILE_ID,
+    userId: session.user.id,
+  });
+
+  return NextResponse.json({ ok: true });
+}

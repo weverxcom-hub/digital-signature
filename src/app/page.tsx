@@ -1,8 +1,8 @@
 import Link from "next/link";
-import Image from "next/image";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
+import { LogoMark } from "@/components/LogoMark";
 import { Button } from "@/components/ui/Button";
 
 export default async function HomePage() {
@@ -22,21 +22,12 @@ export default async function HomePage() {
       >
         <div className="mx-auto max-w-5xl px-6 py-20">
           <div className="flex items-center gap-4">
-            {profile.logoUrl ? (
-              <Image
-                src={profile.logoUrl}
-                alt={profile.name}
-                width={56}
-                height={56}
-                className="h-14 w-14 rounded bg-white p-1 object-contain"
-                unoptimized
-              />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded bg-white/15 text-lg font-bold">
-                {profile.shortName?.slice(0, 2).toUpperCase() ||
-                  profile.name.slice(0, 2).toUpperCase()}
-              </div>
-            )}
+            <LogoMark
+              profile={profile}
+              size={56}
+              className="bg-white p-1"
+              fallbackBg="rgba(255,255,255,0.15)"
+            />
             <div>
               <p className="text-sm uppercase tracking-wide opacity-80">
                 {profile.shortName || "Digital Signature"}
