@@ -14,10 +14,17 @@ export default async function ArchivesPage() {
             token: true,
             signedAt: true,
             revokedAt: true,
+            signatoryId: true,
             signatoryName: true,
             signatoryPosition: true,
           },
           orderBy: { signedAt: "desc" },
+        },
+        requiredSignatories: {
+          select: {
+            signatoryId: true,
+            signatory: { select: { id: true, name: true, position: true } },
+          },
         },
       },
       orderBy: { createdAt: "desc" },
