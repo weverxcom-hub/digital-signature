@@ -1,20 +1,23 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import QRCode from "qrcode";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildVerifyUrl } from "@/lib/signature";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
+import { renderSignatureStamp } from "@/lib/stamp";
 import { pickPrimarySignature } from "@/lib/archiveSignature";
 
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export const dynamic = "force-dynamic";
+
+export async function GET(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const url0 = new URL(req.url);
-  const sigId = url0.searchParams.get("sigId") ?? undefined;
-
+  const sigId = new URL(req.url).searchParams.get("sigId") ?? undefined;
   const archive = await prisma.archive.findUnique({
     where: { id: params.id },
     include: { signatures: { orderBy: { signedAt: "desc" } } },
@@ -32,21 +35,27 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     );
   }
   const profile = await getOrCreateOrganizationProfile();
-  const url = buildVerifyUrl(signature.token, profile.verifyBaseUrl);
+  const verifyUrl = buildVerifyUrl(signature.token, profile.verifyBaseUrl);
 
-  const format = url0.searchParams.get("format") ?? "png";
-  if (format === "svg") {
-    const svg = await QRCode.toString(url, { type: "svg", margin: 1, width: 320 });
-    return new NextResponse(svg, {
-      headers: { "Content-Type": "image/svg+xml; charset=utf-8" },
-    });
-  }
-  if (format === "dataurl" || format === "json") {
-    const dataUrl = await QRCode.toDataURL(url, { margin: 1, width: 320 });
-    return NextResponse.json({ url, dataUrl });
-  }
-  const buffer = await QRCode.toBuffer(url, { margin: 1, width: 320 });
-  return new NextResponse(new Uint8Array(buffer), {
-    headers: { "Content-Type": "image/png" },
+  const png = await renderSignatureStamp({
+    verifyUrl,
+    signatoryName: signature.signatoryName,
+    signatoryPosition: signature.signatoryPosition,
+    signatoryUnit: signature.signatoryUnit,
+    organizationName: profile.name,
+    footerLine1:
+      `Dokumen ini ditandatangani secara elektronik oleh ${profile.name}.`,
+    footerLine2: `Pindai QR untuk verifikasi di ${stripScheme(verifyUrl)}.`,
   });
+
+  return new NextResponse(new Uint8Array(png), {
+    headers: {
+      "Content-Type": "image/png",
+      "Cache-Control": "private, max-age=60",
+    },
+  });
+}
+
+function stripScheme(url: string): string {
+  return url.replace(/^https?:\/\//, "");
 }

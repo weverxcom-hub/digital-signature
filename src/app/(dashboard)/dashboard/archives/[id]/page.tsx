@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { buildVerifyUrl } from "@/lib/signature";
+import { pickPrimarySignature } from "@/lib/archiveSignature";
 import { ArchiveDetailClient } from "./ArchiveDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export default async function ArchiveDetailPage({
     prisma.archive.findUnique({
       where: { id: params.id },
       include: {
-        signature: true,
+        signatures: { orderBy: { signedAt: "desc" } },
         createdBy: { select: { id: true, name: true, email: true } },
       },
     }),
@@ -27,8 +28,9 @@ export default async function ArchiveDetailPage({
   ]);
   if (!archive) notFound();
 
-  const verifyUrl = archive.signature
-    ? buildVerifyUrl(archive.signature.token, profile.verifyBaseUrl)
+  const primary = pickPrimarySignature(archive.signatures);
+  const verifyUrl = primary
+    ? buildVerifyUrl(primary.token, profile.verifyBaseUrl)
     : null;
 
   return (

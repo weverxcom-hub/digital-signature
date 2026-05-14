@@ -59,8 +59,13 @@ export default async function HomePage() {
                 Sign in to dashboard
               </Button>
             </Link>
-            <Link href="#how-it-works">
+            <Link href="/about">
               <Button size="lg" variant="outline" className="border-white/40 bg-transparent text-white hover:bg-white/10">
+                Tentang sistem
+              </Button>
+            </Link>
+            <Link href="#how-it-works">
+              <Button size="lg" variant="ghost" className="text-white hover:bg-white/10">
                 How it works
               </Button>
             </Link>

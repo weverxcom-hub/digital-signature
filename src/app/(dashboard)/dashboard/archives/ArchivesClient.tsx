@@ -23,7 +23,9 @@ type Signature = {
   revokedAt: string | null;
   signatoryName: string;
   signatoryPosition: string;
-} | null;
+};
+
+type ArchiveStatus = "DRAFT" | "PENDING" | "FULLY_SIGNED" | "REVOKED";
 
 type Archive = {
   id: string;
@@ -31,7 +33,8 @@ type Archive = {
   subject: string;
   description: string | null;
   issuedAt: string;
-  signature: Signature;
+  status: ArchiveStatus;
+  signatures: Signature[];
 };
 
 type Signatory = {
@@ -77,7 +80,7 @@ export function ArchivesClient({
       return;
     }
     const created = await res.json();
-    setArchives((prev) => [{ ...created, signature: null }, ...prev]);
+    setArchives((prev) => [{ ...created, signatures: [] }, ...prev]);
     setForm({
       number: "",
       subject: "",
@@ -174,7 +177,8 @@ export function ArchivesClient({
           ) : (
             <ul className="divide-y divide-slate-100">
               {archives.map((a) => {
-                const status = signatureStatus(a.signature);
+                const status = signatureStatus(a);
+                const active = a.signatures.find((s) => !s.revokedAt);
                 return (
                   <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                     <div className="min-w-0 flex-1">
@@ -190,13 +194,13 @@ export function ArchivesClient({
                       <p className="truncate text-sm text-slate-700">{a.subject}</p>
                       <p className="text-xs text-slate-500">
                         Issued {formatDate(a.issuedAt)}
-                        {a.signature && !a.signature.revokedAt && (
+                        {active && (
                           <>
                             {" · signed by "}
                             <span className="font-medium">
-                              {a.signature.signatoryName}
+                              {active.signatoryName}
                             </span>{" "}
-                            ({a.signature.signatoryPosition})
+                            ({active.signatoryPosition})
                           </>
                         )}
                       </p>
@@ -227,8 +231,9 @@ export function ArchivesClient({
   );
 }
 
-function signatureStatus(sig: Signature) {
-  if (!sig) return { label: "draft", variant: "default" as const };
-  if (sig.revokedAt) return { label: "revoked", variant: "danger" as const };
-  return { label: "signed", variant: "success" as const };
+function signatureStatus(a: Archive) {
+  if (a.signatures.length === 0) return { label: "draft", variant: "default" as const };
+  if (a.signatures.some((s) => !s.revokedAt))
+    return { label: "signed", variant: "success" as const };
+  return { label: "revoked", variant: "danger" as const };
 }

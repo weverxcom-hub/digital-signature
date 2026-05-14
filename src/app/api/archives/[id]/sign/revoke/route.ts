@@ -4,9 +4,12 @@ import { z } from "zod";
 import { authOptions, isSuperAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
+import { deriveArchiveStatus } from "@/lib/archiveSignature";
 
 const revokeSchema = z.object({
   reason: z.string().min(3).max(500),
+  // Optional — when omitted, the active signature is revoked.
+  signatureId: z.string().optional(),
 });
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -27,28 +30,46 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   const archive = await prisma.archive.findUnique({
     where: { id: params.id },
-    include: { signature: true },
+    include: { signatures: true },
   });
-  if (!archive || !archive.signature) {
-    return NextResponse.json({ error: "No signature on this archive" }, { status: 404 });
+  if (!archive) {
+    return NextResponse.json({ error: "Archive not found" }, { status: 404 });
   }
-  if (archive.signature.revokedAt) {
+  const target = parsed.data.signatureId
+    ? archive.signatures.find((s) => s.id === parsed.data.signatureId)
+    : archive.signatures.find((s) => !s.revokedAt);
+  if (!target) {
+    return NextResponse.json(
+      { error: "No matching signature on this archive" },
+      { status: 404 }
+    );
+  }
+  if (target.revokedAt) {
     return NextResponse.json({ error: "Signature already revoked" }, { status: 409 });
   }
   const updated = await prisma.archiveSignature.update({
-    where: { id: archive.signature.id },
+    where: { id: target.id },
     data: {
       revokedAt: new Date(),
       revokedReason: parsed.data.reason,
       revokedById: session.user.id,
     },
   });
+
+  const remaining = archive.signatures.map((s) =>
+    s.id === target.id ? { ...s, revokedAt: updated.revokedAt } : s
+  );
+  await prisma.archive.update({
+    where: { id: archive.id },
+    data: { status: deriveArchiveStatus(remaining) },
+  });
+
   await logAudit({
     action: "SIGN_REVOKE",
     entityType: "Archive",
     entityId: archive.id,
     userId: session.user.id,
-    metadata: { reason: parsed.data.reason },
+    metadata: { reason: parsed.data.reason, signatureId: target.id },
   });
   return NextResponse.json(updated);
 }

@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -27,6 +27,13 @@ enum UserRole {
   SUPER_ADMIN
   ADMIN
   USER
+}
+
+enum ArchiveStatus {
+  DRAFT
+  PENDING
+  FULLY_SIGNED
+  REVOKED
 }
 
 model OrganizationProfile {
@@ -58,22 +65,25 @@ model Signatory {
 }
 
 model Archive {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   number      String
   subject     String
   description String?
   issuedAt    DateTime
+  status      ArchiveStatus @default(DRAFT)
   createdById String
-  createdBy   User     @relation(fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdBy   User          @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  signature ArchiveSignature?
+  signatures ArchiveSignature[]
+
+  @@index([status])
 }
 
 model ArchiveSignature {
   id                String   @id @default(cuid())
-  archiveId         String   @unique
+  archiveId         String
   archive           Archive  @relation(fields: [archiveId], references: [id], onDelete: Cascade)
   signatoryId       String
   signatory         Signatory @relation(fields: [signatoryId], references: [id])
@@ -89,6 +99,9 @@ model ArchiveSignature {
   revokedReason     String?
   revokedById       String?
   revokedBy         User?    @relation("RevokedBy", fields: [revokedById], references: [id])
+
+  @@index([archiveId])
+  @@index([archiveId, revokedAt])
 }
 
 model AuditLog {
@@ -98,7 +111,7 @@ model AuditLog {
   entityId   String
   userId     String?
   user       User?    @relation(fields: [userId], references: [id])
-  metadata   String?
+  metadata   Json?
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])

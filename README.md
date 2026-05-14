@@ -11,6 +11,10 @@ their authenticity.
 > via a public verification URL on **your own** domain. Anyone can scan the QR
 > printed on the document and confirm authenticity against your domain.
 
+📖 **Untuk panduan penggunaan harian (Bahasa Indonesia)**, lihat
+[`docs/PANDUAN.md`](docs/PANDUAN.md). Ini sumber resmi panduan — bisa di-edit
+langsung di GitHub kapan saja.
+
 ## Features
 
 - **Organization profile**: name, short name, tagline, logo URL, primary
@@ -36,7 +40,7 @@ their authenticity.
 
 - **Next.js 14** (App Router) + TypeScript
 - **Tailwind CSS** for styling
-- **Prisma** + SQLite (swap to Postgres for production)
+- **Prisma** + PostgreSQL (Neon, Vercel Postgres, Supabase, or self-hosted)
 - **NextAuth** (credentials) + bcrypt for password hashing
 - **qrcode** for QR generation
 
@@ -46,17 +50,22 @@ their authenticity.
 # 1. Install
 npm install
 
-# 2. Configure env
+# 2. Start a local Postgres (Docker)
+docker run -d --name dsig-pg \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=digital_signature \
+  -p 55432:5432 postgres:16-alpine
+
+# 3. Configure env
 cp .env.example .env
 # generate secrets:
 node -e "console.log('NEXTAUTH_SECRET=' + require('crypto').randomBytes(32).toString('base64'))"
 node -e "console.log('SIGNATURE_SECRET=' + require('crypto').randomBytes(32).toString('base64'))"
 # paste them into .env
 
-# 3. Run migrations
-npx prisma migrate dev
+# 4. Run migrations
+npx prisma migrate deploy
 
-# 4. Start dev server
+# 5. Start dev server
 npm run dev
 ```
 
@@ -67,7 +76,7 @@ Then open <http://localhost:3000>. On first visit you'll be redirected to
 
 | Env var                  | Required | Notes                                                                       |
 | ------------------------ | -------- | --------------------------------------------------------------------------- |
-| `DATABASE_URL`           | yes      | SQLite for dev, Postgres for prod (`postgresql://user:pass@host/db`).       |
+| `DATABASE_URL`           | yes      | PostgreSQL connection string (`postgresql://user:pass@host/db?sslmode=require`). |
 | `NEXTAUTH_URL`           | yes      | The URL where this app is hosted (e.g. `https://signatures.example.ac.id`). |
 | `NEXTAUTH_SECRET`        | yes      | Generate with `openssl rand -base64 32`.                                    |
 | `SIGNATURE_SECRET`       | no       | Used to HMAC-sign attestations. Falls back to `NEXTAUTH_SECRET` if unset.   |
@@ -100,8 +109,10 @@ to **your domain**, so visitors can verify by looking at the URL bar.
 1. Push to GitHub.
 2. Import the repo in Vercel.
 3. Add the env vars from `.env.example` (use a managed Postgres for
-   `DATABASE_URL`).
-4. Add a build command override: `prisma migrate deploy && next build`.
+   `DATABASE_URL` — Neon, Vercel Postgres, or Supabase). For Neon, use the
+   **pooled** connection string.
+4. The `vercel.json` already pins the build command to
+   `prisma generate && prisma migrate deploy && next build`.
 5. Set up your domain.
 
 ### Self-hosted (Docker / VPS)

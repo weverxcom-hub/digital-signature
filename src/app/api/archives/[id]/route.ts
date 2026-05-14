@@ -23,7 +23,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const archive = await prisma.archive.findUnique({
     where: { id: params.id },
     include: {
-      signature: { include: { signatory: true } },
+      signatures: { include: { signatory: true }, orderBy: { signedAt: "desc" } },
       createdBy: { select: { id: true, name: true, email: true } },
     },
   });
@@ -40,12 +40,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
   const existing = await prisma.archive.findUnique({
     where: { id: params.id },
-    include: { signature: true },
+    include: { signatures: true },
   });
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (existing.signature && !existing.signature.revokedAt) {
+  if (existing.signatures.some((s) => !s.revokedAt)) {
     return NextResponse.json(
       { error: "Cannot edit a signed archive. Revoke the signature first." },
       { status: 409 }
