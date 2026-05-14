@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
@@ -75,19 +76,35 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     token
   );
 
-  const signature = await prisma.archiveSignature.create({
-    data: {
-      archiveId: archive.id,
-      signatoryId: signatory.id,
-      signatoryName: signatory.name,
-      signatoryPosition: signatory.position,
-      signatoryUnit: signatory.unit,
-      token,
-      hmac,
-      signedById: session.user.id,
-      signedAt,
-    },
-  });
+  let signature;
+  try {
+    signature = await prisma.archiveSignature.create({
+      data: {
+        archiveId: archive.id,
+        signatoryId: signatory.id,
+        signatoryName: signatory.name,
+        signatoryPosition: signatory.position,
+        signatoryUnit: signatory.unit,
+        token,
+        hmac,
+        signedById: session.user.id,
+        signedAt,
+      },
+    });
+  } catch (err) {
+    // Partial unique index `(archiveId, signatoryId) WHERE revokedAt IS NULL`
+    // catches the race window between the duplicate-check above and INSERT.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return NextResponse.json(
+        {
+          error:
+            "This signatory already has an active signature on this archive. Revoke it before re-signing.",
+        },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
 
   const requiredIds = archive.requiredSignatories.map((r) => r.signatoryId);
   await prisma.archive.update({
