@@ -5,10 +5,15 @@ const nextConfig = {
   // tracing follows literal fs.readFileSync paths reasonably well, but
   // we build the path with path.join(process.cwd(), …) so we list the
   // assets explicitly to be safe across Vercel runtime versions.
-  outputFileTracingIncludes: {
-    "/api/archives/[id]/stamp": ["./public/fonts/**"],
-    "/api/archives/[id]/qr": ["./public/fonts/**"],
-    "/api/archives/[id]/embed-pdf": ["./public/fonts/**"],
+  //
+  // In Next.js 14 this key lives under `experimental`; moved to the top
+  // level in Next.js 15. Keep it nested until the dependency bump.
+  experimental: {
+    outputFileTracingIncludes: {
+      "/api/archives/[id]/stamp": ["./public/fonts/**"],
+      "/api/archives/[id]/qr": ["./public/fonts/**"],
+      "/api/archives/[id]/embed-pdf": ["./public/fonts/**"],
+    },
   },
   images: {
     // The dashboard now serves the org logo as an uploaded file via
