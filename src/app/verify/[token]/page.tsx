@@ -4,6 +4,7 @@ import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { LogoMark } from "@/components/LogoMark";
 import { verifySignatureHmac } from "@/lib/signature";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { PdfHashCheck } from "./PdfHashCheck";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +111,19 @@ export default async function VerifyPage({
                     {formatDateTime(sig.signedAt)}
                   </FieldRow>
                 </Section>
+
+                {sig.archive.documentSha256 && status !== "tampered" && (
+                  <div>
+                    <h3 className="text-xs uppercase tracking-wide text-slate-500">
+                      Document file (opsional)
+                    </h3>
+                    <div className="mt-1 rounded border border-slate-100 p-3">
+                      <PdfHashCheck
+                        expectedHash={sig.archive.documentSha256}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {status === "revoked" && (
                   <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">

@@ -79,8 +79,14 @@ Then open <http://localhost:3000>. On first visit you'll be redirected to
 | `DATABASE_URL`           | yes      | PostgreSQL connection string (`postgresql://user:pass@host/db?sslmode=require`). |
 | `NEXTAUTH_URL`           | yes      | The URL where this app is hosted (e.g. `https://signatures.example.ac.id`). |
 | `NEXTAUTH_SECRET`        | yes      | Generate with `openssl rand -base64 32`.                                    |
-| `SIGNATURE_SECRET`       | no       | Used to HMAC-sign attestations. Falls back to `NEXTAUTH_SECRET` if unset.   |
+| `SIGNATURE_SECRET`       | yes      | Used to HMAC-sign attestations. Must be set, distinct from `NEXTAUTH_SECRET`. |
 | `NEXT_PUBLIC_APP_URL`    | yes      | Public URL of this app. Used as the default QR target.                      |
+
+> ⚠️ **Do not rotate `SIGNATURE_SECRET` after launch.** Changing it makes every
+> previously-issued signature show `Integrity check failed` on the verification
+> page. Treat it like a long-lived signing key. If you previously relied on the
+> `NEXTAUTH_SECRET` fallback (removed in this version), copy that value into
+> `SIGNATURE_SECRET` before deploying so existing signatures keep verifying.
 
 Most branding (logo URL, primary color, verification domain) is configured
 **from the dashboard** at `/dashboard/profile`, not via env vars.

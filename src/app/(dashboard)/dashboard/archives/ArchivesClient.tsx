@@ -52,13 +52,19 @@ type Signatory = {
 
 export function ArchivesClient({
   initialArchives,
+  initialTotal,
+  pageSize,
   signatories,
 }: {
   initialArchives: Archive[];
+  initialTotal: number;
+  pageSize: number;
   signatories: Signatory[];
 }) {
   const router = useRouter();
   const [archives, setArchives] = useState<Archive[]>(initialArchives);
+  const [total, setTotal] = useState<number>(initialTotal);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     number: "",
@@ -108,6 +114,7 @@ export function ArchivesClient({
       },
       ...prev,
     ]);
+    setTotal((t) => t + 1);
     setForm({
       number: "",
       subject: "",
@@ -120,6 +127,32 @@ export function ArchivesClient({
     router.refresh();
   }
 
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const res = await fetch(
+        `/api/archives?skip=${archives.length}&take=${pageSize}`
+      );
+      if (!res.ok) {
+        toast.error("Could not load more archives");
+        return;
+      }
+      const data = await res.json();
+      const incoming: Archive[] = Array.isArray(data?.items) ? data.items : [];
+      setArchives((prev) => {
+        const known = new Set(prev.map((a) => a.id));
+        return [...prev, ...incoming.filter((a) => !known.has(a.id))];
+      });
+      if (typeof data?.total === "number") {
+        setTotal(data.total);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  const hasMore = archives.length < total;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -127,6 +160,9 @@ export function ArchivesClient({
           <h1 className="text-2xl font-semibold">Archives</h1>
           <p className="text-sm text-slate-500">
             Documents that can be signed and verified by QR.
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Showing {archives.length} of {total}
           </p>
         </div>
         <Button onClick={() => setCreating((v) => !v)}>
@@ -311,6 +347,19 @@ export function ArchivesClient({
           )}
         </CardContent>
       </Card>
+
+      {hasMore && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </Button>
+        </div>
+      )}
 
       {signatories.length === 0 && (
         <p className="text-xs text-amber-700">

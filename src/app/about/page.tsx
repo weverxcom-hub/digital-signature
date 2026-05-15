@@ -92,6 +92,38 @@ export default async function AboutPage() {
             </ol>
           </section>
 
+          <section className="space-y-3">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Status hukum &amp; batasan
+            </h2>
+            <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p>
+                Sistem ini menerapkan{" "}
+                <strong>Tanda Tangan Elektronik Tidak Tersertifikasi</strong>{" "}
+                sesuai UU ITE No. 11/2008 jo. UU No. 19/2016 dan PP PSTE No.
+                71/2019 tentang Penyelenggaraan Sistem dan Transaksi Elektronik.
+              </p>
+              <p>
+                Ini <strong>bukan</strong> TTE Tersertifikasi yang dikeluarkan
+                Penyelenggara Sertifikasi Elektronik (PSrE) terdaftar Kominfo
+                seperti BSrE, Privy, Vida, PERURI CA, atau Digisign. Tidak ada
+                sertifikat digital X.509 dari otoritas terdaftar — verifikasi
+                mengandalkan integritas server {profile.name} dan domain resmi.
+              </p>
+              <p>
+                Kekuatan pembuktian TTE Tidak Tersertifikasi lebih lemah
+                dibanding TTE Tersertifikasi. Cocok untuk surat administratif
+                internal kampus / instansi, <strong>bukan</strong> untuk
+                dokumen yang membutuhkan kekuatan hukum tertinggi (mis. akta
+                notaris, dokumen perbankan formal, kontrak bermaterai tinggi).
+              </p>
+              <p>
+                Untuk dokumen berbobot hukum tinggi, gunakan TTE Tersertifikasi
+                melalui PSrE resmi.
+              </p>
+            </div>
+          </section>
+
           <section className="space-y-2">
             <h2 className="text-lg font-semibold text-slate-900">
               Mengapa ini bisa dipercaya?
