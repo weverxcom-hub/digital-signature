@@ -32,6 +32,16 @@ export default async function AboutPage() {
             <h1 className="text-2xl font-semibold text-slate-900">
               Tanda Tangan Elektronik {profile.name}
             </h1>
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <p className="font-semibold">TTE Tidak Tersertifikasi</p>
+              <p className="mt-1">
+                Layanan ini menggunakan tanda tangan elektronik tidak
+                tersertifikasi untuk autentikasi internal dan verifikasi
+                integritas dokumen melalui domain resmi instansi, bukan tanda
+                tangan elektronik tersertifikasi dari Penyelenggara Sertifikasi
+                Elektronik.
+              </p>
+            </div>
             <p className="mt-2 text-slate-700">
               Dokumen yang Anda terima dari {profile.name} dapat ditandatangani
               secara elektronik. Setiap dokumen ber-QR yang sah akan memuat

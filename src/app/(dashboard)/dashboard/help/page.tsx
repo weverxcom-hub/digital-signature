@@ -40,6 +40,21 @@ export default async function HelpPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>TTE Tidak Tersertifikasi</CardTitle>
+          <CardDescription>
+            Batasan legal dan teknis penggunaan tanda tangan elektronik.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-slate-700">
+          Layanan ini menggunakan tanda tangan elektronik tidak tersertifikasi
+          untuk autentikasi internal dan verifikasi integritas dokumen melalui
+          domain resmi instansi, bukan tanda tangan elektronik tersertifikasi
+          dari Penyelenggara Sertifikasi Elektronik.
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Alur singkat</CardTitle>
           <CardDescription>
             Lima langkah dari setup awal sampai dokumen siap dikirim.
