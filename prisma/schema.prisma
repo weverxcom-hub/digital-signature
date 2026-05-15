@@ -44,6 +44,9 @@ model OrganizationProfile {
   address       String?
   website       String?
   logoUrl       String?
+  logoBytes     Bytes?
+  logoMimeType  String?
+  logoUpdatedAt DateTime?
   primaryColor  String   @default("#0f766e")
   verifyBaseUrl String?
   setupComplete Boolean  @default(false)

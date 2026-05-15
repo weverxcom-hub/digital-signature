@@ -1,6 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
+import { LogoMark } from "@/components/LogoMark";
 
 export const dynamic = "force-dynamic";
 
@@ -14,25 +14,11 @@ export default async function AboutPage() {
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-2xl px-4 py-10">
         <header className="mb-8 flex items-center gap-3">
-          {profile.logoUrl ? (
-            <Image
-              src={profile.logoUrl}
-              alt={profile.name}
-              width={48}
-              height={48}
-              className="h-12 w-12 rounded bg-white object-contain p-1 shadow-sm"
-              unoptimized
-            />
-          ) : (
-            <div
-              className="flex h-12 w-12 items-center justify-center rounded text-sm font-semibold text-white"
-              style={{ backgroundColor: profile.primaryColor }}
-            >
-              {(
-                profile.shortName?.slice(0, 2) || profile.name.slice(0, 2)
-              ).toUpperCase()}
-            </div>
-          )}
+          <LogoMark
+            profile={profile}
+            size={48}
+            className="bg-white p-1 shadow-sm"
+          />
           <div>
             <p className="text-sm font-medium text-slate-900">{profile.name}</p>
             <p className="text-xs text-slate-500">

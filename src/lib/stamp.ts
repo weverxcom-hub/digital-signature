@@ -1,5 +1,6 @@
-import QRCode from "qrcode";
 import sharp from "sharp";
+import { renderQrPng } from "./qr";
+import { STAMP_FONT_FAMILY, stampFontStyleBlock } from "./stampFont";
 
 export type StampOptions = {
   verifyUrl: string;
@@ -11,6 +12,11 @@ export type StampOptions = {
   footerLine2?: string;
   /** Output width in pixels. Height is derived from layout. */
   width?: number;
+  /** Optional logo to embed in the center of the QR code. */
+  qrLogo?: {
+    bytes: Buffer | Uint8Array;
+    mimeType: string | null;
+  } | null;
 };
 
 const PALETTE = {
@@ -27,21 +33,25 @@ const PALETTE = {
  *
  * The image is built as SVG and rasterized with sharp so it is portable
  * across Node runtimes (Vercel serverless included) without needing a
- * native canvas binding.
+ * native canvas binding. Text uses an embedded Inter webfont — see
+ * `stampFont.ts` for the reason.
  */
 export async function renderSignatureStamp(opts: StampOptions): Promise<Buffer> {
   const width = opts.width ?? 720;
   const padding = 24;
   const qrSize = 180;
   const rowGap = 8;
-  const fontStack =
-    "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+  const fontStack = STAMP_FONT_FAMILY;
 
-  const qrDataUrl = await QRCode.toDataURL(opts.verifyUrl, {
+  // Render the QR PNG separately (with optional logo overlay) and embed
+  // it into the SVG as a base64 data URL.
+  const qrPng = await renderQrPng({
+    url: opts.verifyUrl,
+    size: qrSize * 4, // render 4x and let SVG downscale for crispness
     margin: 1,
-    width: qrSize,
-    errorCorrectionLevel: "M",
+    logo: opts.qrLogo ?? null,
   });
+  const qrDataUrl = `data:image/png;base64,${qrPng.toString("base64")}`;
 
   const textX = padding + qrSize + 24;
   const textWidth = width - textX - padding;
@@ -127,6 +137,7 @@ export async function renderSignatureStamp(opts: StampOptions): Promise<Buffer> 
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${totalHeight}" viewBox="0 0 ${width} ${totalHeight}">
+  <defs>${stampFontStyleBlock()}</defs>
   ${lines.join("\n  ")}
 </svg>`;
 
