@@ -27,7 +27,7 @@ export default async function AboutPage() {
           </div>
         </header>
 
-        <article className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <article className="space-y-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
           <section>
             <h1 className="text-2xl font-semibold text-slate-900">
               Tanda Tangan Elektronik {profile.name}

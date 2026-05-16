@@ -66,7 +66,7 @@ export default async function VerifyPage({
           style={{ borderColor: palette.border }}
         >
           <div
-            className="px-6 py-6 text-white"
+            className="px-4 py-5 text-white sm:px-6 sm:py-6"
             style={{ backgroundColor: palette.accent }}
           >
             <div className="flex items-center gap-3">
@@ -81,7 +81,7 @@ export default async function VerifyPage({
             <p className="mt-3 text-sm text-white/90">{messageFor(status)}</p>
           </div>
 
-          <div className="space-y-4 px-6 py-6">
+          <div className="space-y-4 px-4 py-5 sm:px-6 sm:py-6">
             {sig ? (
               <>
                 <Section title="Document">
@@ -207,9 +207,11 @@ function FieldRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-2 px-3 py-2 text-sm">
-      <dt className="w-24 text-xs text-slate-500">{label}</dt>
-      <dd className="flex-1 text-slate-900">{children}</dd>
+    <div className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[7rem_1fr] sm:items-baseline sm:gap-2">
+      <dt className="text-xs uppercase tracking-wide text-slate-500 sm:normal-case sm:tracking-normal">
+        {label}
+      </dt>
+      <dd className="min-w-0 break-words text-slate-900">{children}</dd>
     </div>
   );
 }
