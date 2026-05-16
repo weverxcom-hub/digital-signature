@@ -4,12 +4,10 @@ import QRCode from "qrcode";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildVerifyUrl } from "@/lib/signature";
-import {
-  DEFAULT_PROFILE_ID,
-  getOrCreateOrganizationProfile,
-} from "@/lib/profile";
+import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { pickPrimarySignature } from "@/lib/archiveSignature";
 import { renderQrPng } from "@/lib/qr";
+import { resolveOrgLogoBytes } from "@/lib/qrLogo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,17 +65,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({ url, dataUrl });
   }
 
-  const logoRow =
-    wantLogo && profile.logoMimeType
-      ? await prisma.organizationProfile.findUnique({
-          where: { id: DEFAULT_PROFILE_ID },
-          select: { logoBytes: true, logoMimeType: true },
-        })
-      : null;
-  const logo =
-    logoRow?.logoBytes && logoRow.logoMimeType
-      ? { bytes: logoRow.logoBytes, mimeType: logoRow.logoMimeType }
-      : null;
+  const logo = wantLogo ? await resolveOrgLogoBytes(profile) : null;
 
   const buffer = await renderQrPng({ url, size: 320, margin: 1, logo });
   return new NextResponse(new Uint8Array(buffer), {

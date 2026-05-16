@@ -4,13 +4,11 @@ import { PDFDocument } from "pdf-lib";
 import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildVerifyUrl } from "@/lib/signature";
-import {
-  DEFAULT_PROFILE_ID,
-  getOrCreateOrganizationProfile,
-} from "@/lib/profile";
+import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { renderSignatureStamp } from "@/lib/stamp";
 import { pickPrimarySignature } from "@/lib/archiveSignature";
 import { logAudit } from "@/lib/audit";
+import { resolveOrgLogoBytes } from "@/lib/qrLogo";
 
 // pdf-lib + sharp need the Node runtime; the default is fine but be explicit
 // so a future refactor doesn't accidentally flip this route to edge.
@@ -129,18 +127,10 @@ export async function POST(
   const profile = await getOrCreateOrganizationProfile();
   const verifyUrl = buildVerifyUrl(signature.token, profile.verifyBaseUrl);
 
-  // Fetch the raw logo bytes (skipped in the cached profile select set)
-  // so the embedded QR carries the org logo in its center.
-  const logoRow = profile.logoMimeType
-    ? await prisma.organizationProfile.findUnique({
-        where: { id: DEFAULT_PROFILE_ID },
-        select: { logoBytes: true, logoMimeType: true },
-      })
-    : null;
-  const qrLogo =
-    logoRow?.logoBytes && logoRow.logoMimeType
-      ? { bytes: logoRow.logoBytes, mimeType: logoRow.logoMimeType }
-      : null;
+  // Resolves uploaded bytes first, otherwise fetches the remote
+  // `logoUrl` once (cached per lambda) so the embedded QR carries the
+  // org logo in its center.
+  const qrLogo = await resolveOrgLogoBytes(profile);
 
   const stampPng = await renderSignatureStamp({
     verifyUrl,

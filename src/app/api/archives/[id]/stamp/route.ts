@@ -3,12 +3,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { buildVerifyUrl } from "@/lib/signature";
-import {
-  DEFAULT_PROFILE_ID,
-  getOrCreateOrganizationProfile,
-} from "@/lib/profile";
+import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { renderSignatureStamp } from "@/lib/stamp";
 import { pickPrimarySignature } from "@/lib/archiveSignature";
+import { resolveOrgLogoBytes } from "@/lib/qrLogo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,38 +39,43 @@ export async function GET(
   const profile = await getOrCreateOrganizationProfile();
   const verifyUrl = buildVerifyUrl(signature.token, profile.verifyBaseUrl);
 
-  // Pull the raw logo bytes only here (and only if the org has uploaded
-  // one). `getOrCreateOrganizationProfile` skips `logoBytes` in its
-  // select set so it doesn't bloat every page render.
-  const logoRow = profile.logoMimeType
-    ? await prisma.organizationProfile.findUnique({
-        where: { id: DEFAULT_PROFILE_ID },
-        select: { logoBytes: true, logoMimeType: true },
-      })
-    : null;
-  const qrLogo =
-    logoRow?.logoBytes && logoRow.logoMimeType
-      ? { bytes: logoRow.logoBytes, mimeType: logoRow.logoMimeType }
-      : null;
+  // Resolves uploaded bytes first, otherwise fetches the remote
+  // `logoUrl` once (cached per lambda). Returns null on any failure so
+  // we never break the stamp because of a slow logo host.
+  const qrLogo = await resolveOrgLogoBytes(profile);
 
-  const png = await renderSignatureStamp({
-    verifyUrl,
-    signatoryName: signature.signatoryName,
-    signatoryPosition: signature.signatoryPosition,
-    signatoryUnit: signature.signatoryUnit,
-    organizationName: profile.name,
-    footerLine1:
-      `Dokumen ini ditandatangani secara elektronik oleh ${profile.name}.`,
-    footerLine2: `Pindai QR untuk verifikasi di ${stripScheme(verifyUrl)}.`,
-    qrLogo,
-  });
+  try {
+    const png = await renderSignatureStamp({
+      verifyUrl,
+      signatoryName: signature.signatoryName,
+      signatoryPosition: signature.signatoryPosition,
+      signatoryUnit: signature.signatoryUnit,
+      organizationName: profile.name,
+      footerLine1:
+        `Dokumen ini ditandatangani secara elektronik oleh ${profile.name}.`,
+      footerLine2: `Pindai QR untuk verifikasi di ${stripScheme(verifyUrl)}.`,
+      qrLogo,
+    });
 
-  return new NextResponse(new Uint8Array(png), {
-    headers: {
-      "Content-Type": "image/png",
-      "Cache-Control": "private, max-age=60",
-    },
-  });
+    return new NextResponse(new Uint8Array(png), {
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "private, max-age=60",
+      },
+    });
+  } catch (err) {
+    // Surface the failure so we can debug it in Vercel logs instead of
+    // serving a blank/broken image to the admin.
+    console.error("[stamp] render failed", {
+      archiveId: params.id,
+      signatureId: signature.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(
+      { error: "Failed to render signature visualization" },
+      { status: 500 }
+    );
+  }
 }
 
 function stripScheme(url: string): string {

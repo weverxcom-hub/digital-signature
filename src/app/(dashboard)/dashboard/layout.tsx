@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { authOptions, isSuperAdmin } from "@/lib/auth";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { LogoMark } from "@/components/LogoMark";
 import { SignOutButton } from "./SignOutButton";
@@ -15,10 +15,15 @@ export default async function DashboardLayout({
   if (!session?.user) redirect("/login");
   const profile = await getOrCreateOrganizationProfile();
 
+  // "Users" is only visible to super admins because that's the only
+  // role that can mutate other users (see /api/users guards).
   const nav = [
     { href: "/dashboard", label: "Overview" },
     { href: "/dashboard/archives", label: "Archives" },
     { href: "/dashboard/signatories", label: "Signatories" },
+    ...(isSuperAdmin(session.user.role)
+      ? [{ href: "/dashboard/users", label: "Users" }]
+      : []),
     { href: "/dashboard/profile", label: "Organization Profile" },
     { href: "/dashboard/audit", label: "Audit Log" },
     { href: "/dashboard/help", label: "Panduan" },
