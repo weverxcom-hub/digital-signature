@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
@@ -9,6 +10,90 @@ import { PdfHashCheck } from "./PdfHashCheck";
 export const dynamic = "force-dynamic";
 
 type VerifyStatus = "valid" | "revoked" | "tampered" | "not_found";
+
+/**
+ * Dynamic metadata for the public verify page.
+ *
+ * - Returns a status-aware title so a verifier can see the result in
+ *   the browser tab even before scrolling.
+ * - `robots: { index: false }` because each verify URL contains a
+ *   sensitive opaque token; we don't want search engines indexing it.
+ * - Canonical URL points at the org's configured verifyBaseUrl so any
+ *   accidental crawlers find the canonical form on the institution's
+ *   own domain rather than a Vercel preview URL.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: { token: string };
+}): Promise<Metadata> {
+  const [sig, profile] = await Promise.all([
+    prisma.archiveSignature.findUnique({
+      where: { token: params.token },
+      include: { archive: true },
+    }),
+    getOrCreateOrganizationProfile(),
+  ]);
+
+  if (!sig) {
+    return {
+      title: `Tanda tangan tidak ditemukan | ${profile.name}`,
+      description:
+        "Token verifikasi tidak ditemukan dalam catatan resmi organisasi.",
+      robots: { index: false, follow: false },
+    };
+  }
+
+  const status: VerifyStatus = sig.revokedAt
+    ? "revoked"
+    : verifySignatureHmac(
+          {
+            archiveId: sig.archiveId,
+            number: sig.archive.number,
+            subject: sig.archive.subject,
+            issuedAt: sig.archive.issuedAt,
+            signatoryId: sig.signatoryId,
+            signatoryName: sig.signatoryName,
+            signatoryPosition: sig.signatoryPosition,
+            signedAt: sig.signedAt,
+          },
+          sig.token,
+          sig.hmac
+        )
+      ? "valid"
+      : "tampered";
+
+  const statusLabel =
+    status === "valid"
+      ? "Signature Valid"
+      : status === "revoked"
+        ? "Signature Revoked"
+        : "Signature Invalid";
+
+  const description = `Verifikasi tanda tangan elektronik untuk ${sig.archive.subject}`;
+  const canonical = profile.verifyBaseUrl
+    ? `${profile.verifyBaseUrl.replace(/\/$/, "")}/verify/${sig.token}`
+    : undefined;
+
+  return {
+    title: `${sig.archive.number} — ${statusLabel} | ${profile.name}`,
+    description,
+    robots: { index: false, follow: false },
+    alternates: canonical ? { canonical } : undefined,
+    openGraph: {
+      title: `${sig.archive.number} — ${statusLabel}`,
+      description,
+      siteName: profile.name,
+      type: "website",
+      url: canonical,
+    },
+    twitter: {
+      card: "summary",
+      title: `${sig.archive.number} — ${statusLabel}`,
+      description,
+    },
+  };
+}
 
 export default async function VerifyPage({
   params,
@@ -57,7 +142,7 @@ export default async function VerifyPage({
           />
           <div>
             <p className="text-sm font-medium text-slate-900">{profile.name}</p>
-            <p className="text-xs text-slate-500">Signature verification</p>
+            <p className="text-xs text-slate-500">Verifikasi tanda tangan</p>
           </div>
         </header>
 
@@ -73,7 +158,7 @@ export default async function VerifyPage({
               <StatusIcon status={status} />
               <div>
                 <p className="text-xs uppercase tracking-wide opacity-80">
-                  Verification result
+                  Hasil verifikasi
                 </p>
                 <h1 className="text-2xl font-semibold">{titleFor(status)}</h1>
               </div>
@@ -84,30 +169,30 @@ export default async function VerifyPage({
           <div className="space-y-4 px-4 py-5 sm:px-6 sm:py-6">
             {sig ? (
               <>
-                <Section title="Document">
-                  <FieldRow label="Number">
+                <Section title="Dokumen">
+                  <FieldRow label="Nomor">
                     <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
                       {sig.archive.number}
                     </code>
                   </FieldRow>
-                  <FieldRow label="Subject">{sig.archive.subject}</FieldRow>
+                  <FieldRow label="Perihal">{sig.archive.subject}</FieldRow>
                   {sig.archive.description && (
-                    <FieldRow label="Description">
+                    <FieldRow label="Deskripsi">
                       {sig.archive.description}
                     </FieldRow>
                   )}
-                  <FieldRow label="Issued">
+                  <FieldRow label="Diterbitkan">
                     {formatDate(sig.archive.issuedAt)}
                   </FieldRow>
                 </Section>
 
-                <Section title="Signatory">
-                  <FieldRow label="Name">{sig.signatoryName}</FieldRow>
-                  <FieldRow label="Position">{sig.signatoryPosition}</FieldRow>
+                <Section title="Penandatangan">
+                  <FieldRow label="Nama">{sig.signatoryName}</FieldRow>
+                  <FieldRow label="Jabatan">{sig.signatoryPosition}</FieldRow>
                   {sig.signatoryUnit && (
                     <FieldRow label="Unit">{sig.signatoryUnit}</FieldRow>
                   )}
-                  <FieldRow label="Signed at">
+                  <FieldRow label="Ditandatangani">
                     {formatDateTime(sig.signedAt)}
                   </FieldRow>
                 </Section>
@@ -115,7 +200,7 @@ export default async function VerifyPage({
                 {sig.archive.documentSha256 && status !== "tampered" && (
                   <div>
                     <h3 className="text-xs uppercase tracking-wide text-slate-500">
-                      Document file (opsional)
+                      Berkas dokumen (opsional)
                     </h3>
                     <div className="mt-1 rounded border border-slate-100 p-3">
                       <PdfHashCheck
@@ -128,17 +213,17 @@ export default async function VerifyPage({
                 {status === "revoked" && (
                   <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
                     <p className="font-medium">
-                      Revoked on {sig.revokedAt && formatDateTime(sig.revokedAt)}
+                      Dicabut pada {sig.revokedAt && formatDateTime(sig.revokedAt)}
                     </p>
                     {sig.revokedReason && (
-                      <p className="mt-1">Reason: {sig.revokedReason}</p>
+                      <p className="mt-1">Alasan: {sig.revokedReason}</p>
                     )}
                   </div>
                 )}
 
                 <details className="rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
                   <summary className="cursor-pointer font-medium text-slate-700">
-                    Technical details
+                    Detail teknis
                   </summary>
                   <dl className="mt-2 space-y-1">
                     <div>
@@ -154,7 +239,8 @@ export default async function VerifyPage({
               </>
             ) : (
               <p className="text-sm text-slate-600">
-                No record matches the token <code>{params.token}</code>.
+                Tidak ada catatan yang cocok dengan token{" "}
+                <code>{params.token}</code>.
               </p>
             )}
           </div>
@@ -167,8 +253,8 @@ export default async function VerifyPage({
             </Link>
           ) : null}
           <p className="mt-2">
-            This page is the official verification endpoint for documents
-            signed via {profile.name}.{" "}
+            Halaman ini adalah endpoint verifikasi resmi untuk dokumen
+            yang ditandatangani melalui {profile.name}.{" "}
             <Link href="/about" className="underline hover:text-slate-700">
               Pelajari cara kerjanya
             </Link>
@@ -244,26 +330,26 @@ function paletteFor(status: VerifyStatus, primary: string) {
 function titleFor(status: VerifyStatus) {
   switch (status) {
     case "valid":
-      return "Signature valid";
+      return "Tanda tangan valid";
     case "revoked":
-      return "Signature revoked";
+      return "Tanda tangan dicabut";
     case "tampered":
-      return "Integrity check failed";
+      return "Integritas gagal diverifikasi";
     case "not_found":
-      return "Not found";
+      return "Tidak ditemukan";
   }
 }
 
 function messageFor(status: VerifyStatus) {
   switch (status) {
     case "valid":
-      return "This document was signed by the listed signatory. Details below match the official records.";
+      return "Dokumen ini ditandatangani oleh penandatangan tertera. Detail di bawah ini cocok dengan catatan resmi.";
     case "revoked":
-      return "This signature has been revoked. The document should no longer be considered valid.";
+      return "Tanda tangan ini telah dicabut. Dokumen sebaiknya tidak lagi dianggap sah.";
     case "tampered":
-      return "The signature record failed an HMAC integrity check. Treat this document as suspicious and contact the issuer.";
+      return "Catatan tanda tangan gagal verifikasi HMAC. Anggap dokumen ini mencurigakan dan hubungi penerbit.";
     case "not_found":
-      return "We could not find a signature record matching this token. The QR may be invalid or expired.";
+      return "Tidak ada catatan tanda tangan yang cocok dengan token ini. QR mungkin tidak valid atau sudah kedaluwarsa.";
   }
 }
 

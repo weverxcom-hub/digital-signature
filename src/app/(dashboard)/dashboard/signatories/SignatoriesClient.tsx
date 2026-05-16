@@ -37,6 +37,12 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
   const [list, setList] = useState<Signatory[]>(initial);
   const [editing, setEditing] = useState<typeof emptyForm | null>(null);
   const [busy, setBusy] = useState(false);
+  // Inline confirmation pattern: tracks which row the user has armed
+  // for deletion. Renders an explicit "Yakin hapus?" prompt next to the
+  // row instead of relying on the browser's blocking window.confirm()
+  // dialog (which is not accessible and gets blocked on iOS PWA).
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [removingBusyId, setRemovingBusyId] = useState<string | null>(null);
 
   function openCreate() {
     setEditing({ ...emptyForm });
@@ -88,14 +94,16 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
   }
 
   async function remove(id: string) {
-    if (!confirm("Soft-delete this signatory? Existing signatures remain valid.")) return;
+    setRemovingBusyId(id);
     const res = await fetch(`/api/signatories/${id}`, { method: "DELETE" });
+    setRemovingBusyId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      toast.error(data?.error || "Could not delete");
+      toast.error(data?.error || "Gagal menghapus");
       return;
     }
-    toast.success("Signatory removed");
+    toast.success("Signatory dihapus");
+    setDeletingId(null);
     setList((prev) => prev.filter((s) => s.id !== id));
     router.refresh();
   }
@@ -106,11 +114,12 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Signatories</h1>
           <p className="text-sm text-slate-500">
-            People who can be selected as a signer when an admin signs an archive.
+            Orang yang dapat dipilih sebagai signer ketika admin
+            menandatangani arsip.
           </p>
         </div>
         <Button onClick={openCreate} className="shrink-0">
-          Add signatory
+          Tambah signatory
         </Button>
       </div>
 
@@ -118,17 +127,18 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
         <Card>
           <CardHeader>
             <CardTitle>
-              {editing.id ? "Edit signatory" : "Add signatory"}
+              {editing.id ? "Edit signatory" : "Tambah signatory"}
             </CardTitle>
             <CardDescription>
-              The full name and position are snapshotted into each signature so
-              renaming a person later won&apos;t change past attestations.
+              Nama lengkap dan jabatan akan di-snapshot ke setiap tanda
+              tangan sehingga mengganti nama orang di kemudian hari
+              tidak akan mengubah atestasi yang lama.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <Label htmlFor="name">Full name *</Label>
+                <Label htmlFor="name">Nama lengkap *</Label>
                 <Input
                   id="name"
                   required
@@ -140,7 +150,7 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
                 />
               </div>
               <div>
-                <Label htmlFor="position">Position / title *</Label>
+                <Label htmlFor="position">Jabatan *</Label>
                 <Input
                   id="position"
                   required
@@ -152,25 +162,25 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
                 />
               </div>
               <div>
-                <Label htmlFor="unit">Unit / faculty</Label>
+                <Label htmlFor="unit">Unit / fakultas</Label>
                 <Input
                   id="unit"
                   value={editing.unit}
                   onChange={(e) =>
                     setEditing({ ...editing, unit: e.target.value })
                   }
-                  placeholder="Optional"
+                  placeholder="Opsional"
                 />
               </div>
               <div>
-                <Label htmlFor="nip">NIP / employee ID</Label>
+                <Label htmlFor="nip">NIP / ID pegawai</Label>
                 <Input
                   id="nip"
                   value={editing.nip}
                   onChange={(e) =>
                     setEditing({ ...editing, nip: e.target.value })
                   }
-                  placeholder="Optional"
+                  placeholder="Opsional"
                 />
               </div>
             </div>
@@ -182,18 +192,18 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
                   setEditing({ ...editing, active: e.target.checked })
                 }
               />
-              Active (eligible to sign)
+              Aktif (boleh menandatangani)
             </label>
             <div className="flex gap-2">
               <Button onClick={save} disabled={busy}>
-                {busy ? "Saving…" : "Save"}
+                {busy ? "Menyimpan…" : "Simpan"}
               </Button>
               <Button
                 variant="ghost"
                 onClick={() => setEditing(null)}
                 disabled={busy}
               >
-                Cancel
+                Batal
               </Button>
             </div>
           </CardContent>
@@ -204,47 +214,81 @@ export function SignatoriesClient({ initial }: { initial: Signatory[] }) {
         <CardContent className="p-0">
           {list.length === 0 ? (
             <p className="p-6 text-sm text-slate-500">
-              No signatories yet. Add one to enable signing.
+              Belum ada signatory. Tambahkan terlebih dahulu agar bisa
+              menandatangani.
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
-              {list.map((s) => (
-                <li
-                  key={s.id}
-                  className="flex flex-wrap items-center justify-between gap-3 p-4"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold">{s.name}</p>
-                      {s.active ? (
-                        <Badge variant="success">active</Badge>
-                      ) : (
-                        <Badge variant="warning">inactive</Badge>
+              {list.map((s) => {
+                const armed = deletingId === s.id;
+                const busyDel = removingBusyId === s.id;
+                return (
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-center justify-between gap-3 p-4"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold">{s.name}</p>
+                        {s.active ? (
+                          <Badge variant="success">aktif</Badge>
+                        ) : (
+                          <Badge variant="warning">nonaktif</Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-600">{s.position}</p>
+                      {(s.unit || s.nip) && (
+                        <p className="text-xs text-slate-500">
+                          {[s.unit, s.nip && `NIP ${s.nip}`]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
                       )}
                     </div>
-                    <p className="text-sm text-slate-600">{s.position}</p>
-                    {(s.unit || s.nip) && (
-                      <p className="text-xs text-slate-500">
-                        {[s.unit, s.nip && `NIP ${s.nip}`]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 gap-2">
-                    <Button variant="outline" size="sm" onClick={() => openEdit(s)}>
-                      Edit
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => remove(s.id)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </li>
-              ))}
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEdit(s)}
+                        disabled={armed}
+                      >
+                        Edit
+                      </Button>
+                      {armed ? (
+                        <>
+                          <span className="self-center text-xs text-slate-600">
+                            Yakin hapus?
+                          </span>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => remove(s.id)}
+                            disabled={busyDel}
+                          >
+                            {busyDel ? "Menghapus…" : "Ya, hapus"}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDeletingId(null)}
+                            disabled={busyDel}
+                          >
+                            Batal
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeletingId(s.id)}
+                        >
+                          Hapus
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>

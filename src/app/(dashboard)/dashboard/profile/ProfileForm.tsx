@@ -48,6 +48,50 @@ export function ProfileForm({ initial }: { initial: Profile }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // verifyBaseUrl reachability probe state.
+  // Holds the result of the most recent /api/profile/test-url call so
+  // the admin can see whether the configured domain responds.
+  const [testingUrl, setTestingUrl] = useState(false);
+  const [urlTestResult, setUrlTestResult] = useState<
+    | null
+    | {
+        ok: boolean;
+        status?: number;
+        latencyMs?: number;
+        target?: string;
+        error?: string;
+        warning?: string;
+      }
+  >(null);
+
+  async function testVerifyBaseUrl() {
+    const url = (form.verifyBaseUrl ?? "").trim();
+    if (!url) {
+      toast.error("Isi verifyBaseUrl terlebih dahulu");
+      return;
+    }
+    setTestingUrl(true);
+    setUrlTestResult(null);
+    try {
+      const res = await fetch("/api/profile/test-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setUrlTestResult({
+          ok: false,
+          error: data?.error || "Permintaan test gagal",
+        });
+        return;
+      }
+      setUrlTestResult(data);
+    } finally {
+      setTestingUrl(false);
+    }
+  }
+
   // Free the object URL when the component unmounts or the preview is replaced.
   useEffect(() => {
     return () => {
@@ -322,25 +366,82 @@ export function ProfileForm({ initial }: { initial: Profile }) {
         <CardHeader>
           <CardTitle>Verification URL</CardTitle>
           <CardDescription>
-            Domain to which QR codes will point.
+            Domain tujuan QR code. Gunakan tombol <em>Test URL</em>
+            untuk memastikan domain bisa dijangkau.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
             <Label htmlFor="verifyBaseUrl">Verify base URL</Label>
-            <Input
-              id="verifyBaseUrl"
-              type="url"
-              value={form.verifyBaseUrl ?? ""}
-              onChange={(e) => update("verifyBaseUrl", e.target.value)}
-              placeholder="https://unigamalang.ac.id"
-            />
+            <div className="flex flex-wrap gap-2">
+              <Input
+                id="verifyBaseUrl"
+                type="url"
+                value={form.verifyBaseUrl ?? ""}
+                onChange={(e) => update("verifyBaseUrl", e.target.value)}
+                placeholder="https://unigamalang.ac.id"
+                className="min-w-[240px] flex-1"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={testVerifyBaseUrl}
+                disabled={testingUrl}
+              >
+                {testingUrl ? "Menguji…" : "Test URL"}
+              </Button>
+            </div>
             <FieldHint>
-              Defaults to the app URL if blank. Set to your official domain so
-              QR codes resolve to <code>{form.verifyBaseUrl || "https://yourdomain.tld"}/verify/&lt;token&gt;</code>{" "}
-              for public trust. The page at that route must point to this app
-              (e.g. via subdomain or reverse-proxy).
+              Defaults ke URL aplikasi jika kosong. Set ke domain resmi
+              organisasi sehingga QR mengarah ke{" "}
+              <code>{form.verifyBaseUrl || "https://yourdomain.tld"}/verify/&lt;token&gt;</code>{" "}
+              untuk public trust. Domain tersebut harus diarahkan ke
+              aplikasi ini (mis. subdomain atau reverse-proxy).
             </FieldHint>
+            {form.verifyBaseUrl &&
+              form.verifyBaseUrl.trim().toLowerCase().startsWith("http:") && (
+                <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Disarankan menggunakan HTTPS agar QR verification tidak
+                  rentan terhadap MITM.
+                </p>
+              )}
+            {urlTestResult && (
+              <div
+                className={`mt-2 rounded border px-3 py-2 text-xs ${
+                  urlTestResult.ok && urlTestResult.status && urlTestResult.status < 500
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-red-200 bg-red-50 text-red-800"
+                }`}
+              >
+                {urlTestResult.ok ? (
+                  <>
+                    <p className="font-medium">
+                      Domain merespons HTTP {urlTestResult.status}
+                      {typeof urlTestResult.latencyMs === "number" &&
+                        ` (${urlTestResult.latencyMs}ms)`}
+                    </p>
+                    <p className="break-all opacity-80">
+                      Probe: <code>{urlTestResult.target}</code>
+                    </p>
+                    {urlTestResult.warning && (
+                      <p className="mt-1 text-amber-700">
+                        {urlTestResult.warning}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium">Tidak dapat menjangkau domain</p>
+                    <p className="opacity-80">{urlTestResult.error}</p>
+                    {urlTestResult.target && (
+                      <p className="break-all opacity-80">
+                        Probe: <code>{urlTestResult.target}</code>
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

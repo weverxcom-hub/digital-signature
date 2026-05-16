@@ -20,6 +20,30 @@ export const dynamic = "force-dynamic";
 // from OOMs on Vercel's serverless runtime.
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
+// Hard ceiling on PDF page count. A 500-page PDF would balloon memory
+// during pdf-lib parsing on serverless. We refuse those upfront.
+const MAX_PDF_PAGES = 500;
+
+// Soft timeouts (Vercel hobby plan kills functions at ~10s).
+const STAMP_RENDER_TIMEOUT_MS = 12_000;
+const PDF_LOAD_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms`)),
+        ms
+      )
+    ),
+  ]);
+}
+
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 const VALID_CORNERS: readonly Corner[] = [
   "top-left",
@@ -69,6 +93,14 @@ export async function POST(
     return NextResponse.json(
       { error: "Missing PDF file in 'file' field" },
       { status: 400 }
+    );
+  }
+  // Browser-declared MIME type. Spoofable, so it's not the only check
+  // — the magic-byte check further down is defense in depth.
+  if (fileEntry.type && fileEntry.type !== "application/pdf") {
+    return NextResponse.json(
+      { error: `Unsupported MIME type: ${fileEntry.type}. Expected application/pdf.` },
+      { status: 415 }
     );
   }
   if (fileEntry.size === 0) {
@@ -132,31 +164,57 @@ export async function POST(
   // org logo in its center.
   const qrLogo = await resolveOrgLogoBytes(profile);
 
-  const stampPng = await renderSignatureStamp({
-    verifyUrl,
-    signatoryName: signature.signatoryName,
-    signatoryPosition: signature.signatoryPosition,
-    signatoryUnit: signature.signatoryUnit,
-    organizationName: profile.name,
-    footerLine1: `Dokumen ini ditandatangani secara elektronik oleh ${profile.name}.`,
-    footerLine2: `Pindai QR untuk verifikasi di ${stripScheme(verifyUrl)}.`,
-    qrLogo,
-  });
+  let stampPng: Buffer;
+  try {
+    stampPng = await withTimeout(
+      renderSignatureStamp({
+        verifyUrl,
+        signatoryName: signature.signatoryName,
+        signatoryPosition: signature.signatoryPosition,
+        signatoryUnit: signature.signatoryUnit,
+        organizationName: profile.name,
+        footerLine1: `Dokumen ini ditandatangani secara elektronik oleh ${profile.name}.`,
+        footerLine2: `Pindai QR untuk verifikasi di ${stripScheme(verifyUrl)}.`,
+        qrLogo,
+      }),
+      STAMP_RENDER_TIMEOUT_MS,
+      "renderSignatureStamp"
+    );
+  } catch (err) {
+    console.error("[embed-pdf] stamp render failed", err);
+    return NextResponse.json(
+      { error: "Gagal merender visualisasi tanda tangan" },
+      { status: 504 }
+    );
+  }
 
   let pdfDoc: PDFDocument;
   try {
-    pdfDoc = await PDFDocument.load(fileBytes);
-  } catch {
-    return NextResponse.json(
-      { error: "PDF could not be parsed. It may be encrypted or malformed." },
-      { status: 400 }
+    pdfDoc = await withTimeout(
+      PDFDocument.load(fileBytes),
+      PDF_LOAD_TIMEOUT_MS,
+      "PDFDocument.load"
     );
+  } catch (err) {
+    const message =
+      err instanceof Error && err.message.includes("timed out")
+        ? "Loading PDF terlalu lama—file mungkin terlalu kompleks."
+        : "PDF tidak bisa di-parse. Mungkin ter-enkripsi atau rusak.";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
   const pages = pdfDoc.getPages();
   if (pages.length === 0) {
     return NextResponse.json(
       { error: "PDF has no pages" },
       { status: 400 }
+    );
+  }
+  if (pages.length > MAX_PDF_PAGES) {
+    return NextResponse.json(
+      {
+        error: `PDF terlalu banyak halaman (${pages.length}). Maksimum ${MAX_PDF_PAGES} halaman.`,
+      },
+      { status: 413 }
     );
   }
   const stampImage = await pdfDoc.embedPng(stampPng);

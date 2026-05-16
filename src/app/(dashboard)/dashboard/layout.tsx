@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
-import { authOptions, isSuperAdmin } from "@/lib/auth";
+import { authOptions, isAdmin, isSuperAdmin } from "@/lib/auth";
 import { getOrCreateOrganizationProfile } from "@/lib/profile";
 import { LogoMark } from "@/components/LogoMark";
 import { SignOutButton } from "./SignOutButton";
@@ -17,15 +17,20 @@ export default async function DashboardLayout({
 
   // "Users" is only visible to super admins because that's the only
   // role that can mutate other users (see /api/users guards).
+  // Bahasa Indonesia primer; istilah teknis (QR, PDF, Audit) tetap
+  // dalam Inggris karena sudah jadi vocabulary domain di institusi
+  // Indonesia.
   const nav = [
-    { href: "/dashboard", label: "Overview" },
-    { href: "/dashboard/archives", label: "Archives" },
+    { href: "/dashboard", label: "Ringkasan" },
+    { href: "/dashboard/archives", label: "Arsip" },
     { href: "/dashboard/signatories", label: "Signatories" },
     ...(isSuperAdmin(session.user.role)
-      ? [{ href: "/dashboard/users", label: "Users" }]
+      ? [{ href: "/dashboard/users", label: "Pengguna" }]
       : []),
-    { href: "/dashboard/profile", label: "Organization Profile" },
-    { href: "/dashboard/audit", label: "Audit Log" },
+    { href: "/dashboard/profile", label: "Profil organisasi" },
+    ...(isAdmin(session.user.role)
+      ? [{ href: "/dashboard/audit", label: "Audit log" }]
+      : []),
     { href: "/dashboard/help", label: "Panduan" },
   ];
 
@@ -55,7 +60,7 @@ export default async function DashboardLayout({
         {children}
       </main>
       <footer className="border-t border-slate-200 px-4 py-4 text-center text-xs text-slate-500 sm:px-6">
-        Signed in as{" "}
+        Masuk sebagai{" "}
         <span className="break-all">{session.user.email}</span> · role:{" "}
         {session.user.role}
       </footer>

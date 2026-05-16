@@ -10,12 +10,14 @@ export type AuditAction =
   | "EMBED_PDF"
   | "BIND_DOCUMENT"
   | "LOGIN"
+  | "LOGIN_FAILED"
   | "PROFILE_UPDATE"
   | "PROFILE_LOGO_UPLOAD"
   | "PROFILE_LOGO_REMOVE"
   | "USER_CREATE"
   | "USER_UPDATE"
-  | "USER_DELETE";
+  | "USER_DELETE"
+  | "AUDIT_EXPORT";
 
 export async function logAudit(params: {
   action: AuditAction;

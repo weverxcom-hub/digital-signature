@@ -16,6 +16,81 @@ import {
 } from "@/components/ui/Card";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
+/**
+ * Renders a server-generated PNG (QR or stamp) with skeleton + error
+ * fallback. Both endpoints can take a couple of seconds on cold start
+ * (sharp + opentype.js) so giving the user something to look at while
+ * loading keeps the UI from feeling broken.
+ */
+function RenderedImage({
+  src,
+  alt,
+  className,
+  imgClassName,
+  skeletonClassName,
+  width,
+  height,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  imgClassName?: string;
+  skeletonClassName?: string;
+  width?: number;
+  height?: number;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
+  // Bumped each retry so the browser doesn't reuse a cached error.
+  const [nonce, setNonce] = useState(0);
+  const finalSrc = nonce === 0 ? src : `${src}${src.includes("?") ? "&" : "?"}_=${nonce}`;
+  return (
+    <div className={className}>
+      {errored ? (
+        <div
+          className={`flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-xs text-slate-600 ${skeletonClassName ?? ""}`}
+        >
+          <p>Gagal memuat gambar.</p>
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            onClick={() => {
+              setErrored(false);
+              setLoaded(false);
+              setNonce((n) => n + 1);
+            }}
+          >
+            Coba lagi
+          </Button>
+        </div>
+      ) : (
+        <>
+          {!loaded && (
+            <div
+              aria-hidden
+              className={`animate-pulse rounded-md bg-slate-200 ${skeletonClassName ?? ""}`}
+            />
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={finalSrc}
+            alt={alt}
+            width={width}
+            height={height}
+            loading="lazy"
+            decoding="async"
+            className={imgClassName}
+            onLoad={() => setLoaded(true)}
+            onError={() => setErrored(true)}
+            style={{ display: loaded ? undefined : "none" }}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
 type Signature = {
   id: string;
   token: string;
@@ -146,6 +221,17 @@ export function ArchiveDetailClient({
   const showPreview =
     previewSignature !== null && !previewSignature.revokedAt && !!verifyUrl;
 
+  // After successful sign/revoke we trigger a server refresh in the
+  // background but preserve the current scroll position so the user
+  // doesn't get bumped to the top of long detail pages.
+  function refreshKeepingScroll() {
+    const y = typeof window !== "undefined" ? window.scrollY : 0;
+    router.refresh();
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => window.scrollTo({ top: y, behavior: "auto" }));
+    }
+  }
+
   async function signAs(signatoryId: string) {
     setBusySignatoryId(signatoryId);
     const res = await fetch(`/api/archives/${archive.id}/sign`, {
@@ -156,16 +242,16 @@ export function ArchiveDetailClient({
     setBusySignatoryId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      toast.error(data?.error || "Could not sign archive");
+      toast.error(data?.error || "Tanda tangan gagal disimpan");
       return;
     }
-    toast.success("Signature added");
-    router.refresh();
+    toast.success("Tanda tangan ditambahkan");
+    refreshKeepingScroll();
   }
 
   async function signAdHoc() {
     if (!adHocSignatoryId) {
-      toast.error("Pick a signatory first");
+      toast.error("Pilih signatory terlebih dahulu");
       return;
     }
     setAdHocBusy(true);
@@ -177,17 +263,17 @@ export function ArchiveDetailClient({
     setAdHocBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      toast.error(data?.error || "Could not sign archive");
+      toast.error(data?.error || "Tanda tangan gagal disimpan");
       return;
     }
-    toast.success("Signature added");
-    router.refresh();
+    toast.success("Tanda tangan ditambahkan");
+    refreshKeepingScroll();
   }
 
   async function revokeSignature(signatureId: string) {
     const reason = (revokeReason[signatureId] ?? "").trim();
     if (!reason) {
-      toast.error("Please provide a reason for revocation");
+      toast.error("Alasan revoke wajib diisi");
       return;
     }
     setRevokingId(signatureId);
@@ -199,11 +285,33 @@ export function ArchiveDetailClient({
     setRevokingId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      toast.error(data?.error || "Could not revoke signature");
+      toast.error(data?.error || "Gagal revoke tanda tangan");
       return;
     }
-    toast.success("Signature revoked");
-    router.refresh();
+    toast.success("Tanda tangan di-revoke");
+    refreshKeepingScroll();
+  }
+
+  // Archive delete is only allowed for DRAFT archives (no signatures
+  // at all). The API also enforces this; we mirror it client-side so
+  // the destructive button only ever appears when it can succeed.
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [deletingArchive, setDeletingArchive] = useState(false);
+  const canDeleteArchive =
+    archive.status === "DRAFT" && sortedSignatures.length === 0;
+  async function deleteArchive() {
+    setDeletingArchive(true);
+    const res = await fetch(`/api/archives/${archive.id}`, {
+      method: "DELETE",
+    });
+    setDeletingArchive(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error || "Gagal menghapus arsip");
+      return;
+    }
+    toast.success("Arsip dihapus");
+    router.replace("/dashboard/archives");
   }
 
   async function onBindFileChange(file: File | null) {
@@ -341,19 +449,57 @@ export function ArchiveDetailClient({
           <h1 className="text-2xl font-semibold">{archive.number}</h1>
           <p className="text-sm text-slate-600">{archive.subject}</p>
           <p className="text-xs text-slate-500">
-            Issued {formatDate(archive.issuedAt)} · created by{" "}
+            Diterbitkan {formatDate(archive.issuedAt)} · dibuat oleh{" "}
             {archive.createdBy.name}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
           {requiredCount > 0 && (
             <span className="text-xs text-slate-500">
-              {signedRequiredCount}/{requiredCount} required signers
+              {signedRequiredCount}/{requiredCount} signer wajib
             </span>
           )}
+          {canDeleteArchive &&
+            (deleteArmed ? (
+              <span className="inline-flex flex-wrap items-center gap-1">
+                <span className="text-xs text-slate-600">Yakin hapus?</span>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={deleteArchive}
+                  disabled={deletingArchive}
+                >
+                  {deletingArchive ? "Menghapus…" : "Ya, hapus"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setDeleteArmed(false)}
+                  disabled={deletingArchive}
+                >
+                  Batal
+                </Button>
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setDeleteArmed(true)}
+                title="Hanya arsip DRAFT (belum ada tanda tangan) yang bisa dihapus"
+              >
+                Hapus arsip
+              </Button>
+            ))}
         </div>
       </div>
+      {archive.status !== "DRAFT" && sortedSignatures.length > 0 && (
+        <p className="text-xs text-slate-500">
+          Arsip yang sudah pernah ditandatangani tidak bisa dihapus —
+          hanya signature-nya yang bisa di-revoke. Token verifikasi yang
+          mungkin sudah dicetak harus tetap bisa di-resolve.
+        </p>
+      )}
 
       <div className="grid gap-6 md:grid-cols-3">
         <div className="space-y-6 md:col-span-2">
@@ -361,11 +507,11 @@ export function ArchiveDetailClient({
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Document metadata</CardTitle>
+                  <CardTitle>Metadata dokumen</CardTitle>
                   <CardDescription>
                     {hasAnyActiveSignature
-                      ? "Locked while any signature is active. Revoke all signatures first to edit."
-                      : "Edit the document metadata before signing."}
+                      ? "Terkunci selama ada tanda tangan aktif. Revoke semua tanda tangan terlebih dahulu untuk mengedit."
+                      : "Edit metadata dokumen sebelum ditandatangani."}
                   </CardDescription>
                 </div>
                 {!hasAnyActiveSignature &&
@@ -375,7 +521,7 @@ export function ArchiveDetailClient({
                       size="sm"
                       onClick={() => setEditing(false)}
                     >
-                      Cancel
+                      Batal
                     </Button>
                   ) : (
                     <Button
@@ -393,7 +539,7 @@ export function ArchiveDetailClient({
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
-                      <Label htmlFor="number">Number</Label>
+                      <Label htmlFor="number">Nomor</Label>
                       <Input
                         id="number"
                         value={form.number}
@@ -403,7 +549,7 @@ export function ArchiveDetailClient({
                       />
                     </div>
                     <div>
-                      <Label htmlFor="issuedAt">Issued at</Label>
+                      <Label htmlFor="issuedAt">Tanggal terbit</Label>
                       <Input
                         id="issuedAt"
                         type="date"
@@ -415,7 +561,7 @@ export function ArchiveDetailClient({
                     </div>
                   </div>
                   <div>
-                    <Label htmlFor="subject">Subject</Label>
+                    <Label htmlFor="subject">Perihal</Label>
                     <Input
                       id="subject"
                       value={form.subject}
@@ -425,7 +571,7 @@ export function ArchiveDetailClient({
                     />
                   </div>
                   <div>
-                    <Label htmlFor="description">Description</Label>
+                    <Label htmlFor="description">Deskripsi</Label>
                     <Textarea
                       id="description"
                       rows={3}
@@ -436,17 +582,19 @@ export function ArchiveDetailClient({
                     />
                   </div>
                   <Button onClick={saveEdits} disabled={editBusy}>
-                    {editBusy ? "Saving…" : "Save"}
+                    {editBusy ? "Menyimpan…" : "Simpan"}
                   </Button>
                 </div>
               ) : (
                 <dl className="grid gap-3 text-sm md:grid-cols-2">
-                  <Field label="Number">{archive.number}</Field>
-                  <Field label="Issued at">{formatDate(archive.issuedAt)}</Field>
-                  <Field label="Subject" wide>
+                  <Field label="Nomor">{archive.number}</Field>
+                  <Field label="Tanggal terbit">
+                    {formatDate(archive.issuedAt)}
+                  </Field>
+                  <Field label="Perihal" wide>
                     {archive.subject}
                   </Field>
-                  <Field label="Description" wide>
+                  <Field label="Deskripsi" wide>
                     {archive.description || (
                       <span className="text-slate-400">—</span>
                     )}
@@ -461,9 +609,9 @@ export function ArchiveDetailClient({
               <CardTitle>Bind PDF (opsional)</CardTitle>
               <CardDescription>
                 Catat SHA-256 file PDF di sistem agar penerima bisa
-                memverifikasi bahwa PDF yang mereka pegang identik byte-for-byte
-                dengan yang admin daftarkan. Bersifat optional &amp; advisory —
-                tidak meng-invalidate signature.
+                memverifikasi bahwa PDF yang mereka pegang identik
+                byte-for-byte dengan yang admin daftarkan. Bersifat
+                optional &amp; advisory — tidak meng-invalidate signature.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
@@ -535,10 +683,11 @@ export function ArchiveDetailClient({
           {requiredCount > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>Required signers</CardTitle>
+                <CardTitle>Signer wajib</CardTitle>
                 <CardDescription>
-                  Each required signatory must sign before the archive becomes
-                  fully signed. Add or revoke signatures as needed.
+                  Setiap signer wajib harus tanda tangan sebelum status
+                  arsip menjadi fully signed. Tambah atau revoke
+                  tanda tangan sesuai kebutuhan.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -559,16 +708,16 @@ export function ArchiveDetailClient({
                           </p>
                         </div>
                         {signed ? (
-                          <Badge variant="success">signed</Badge>
+                          <Badge variant="success">tertandatangani</Badge>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <Badge variant="warning">pending</Badge>
+                            <Badge variant="warning">menunggu</Badge>
                             <Button
                               size="sm"
                               onClick={() => signAs(r.signatoryId)}
                               disabled={busy}
                             >
-                              {busy ? "Signing…" : "Sign as this signer"}
+                              {busy ? "Menandatangani…" : "Tanda tangan"}
                             </Button>
                           </div>
                         )}
@@ -582,19 +731,19 @@ export function ArchiveDetailClient({
 
           <Card>
             <CardHeader>
-              <CardTitle>Signatures</CardTitle>
+              <CardTitle>Tanda tangan</CardTitle>
               <CardDescription>
                 {sortedSignatures.length === 0
-                  ? "No signatures yet."
-                  : `${activeSignatures.length} active · ${
+                  ? "Belum ada tanda tangan."
+                  : `${activeSignatures.length} aktif · ${
                       sortedSignatures.length - activeSignatures.length
-                    } revoked`}
+                    } di-revoke`}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {sortedSignatures.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  Use the section below to add a signature.
+                  Gunakan bagian di bawah untuk menambah tanda tangan.
                 </p>
               ) : (
                 <ul className="space-y-3">
@@ -608,9 +757,9 @@ export function ArchiveDetailClient({
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium">{s.signatoryName}</p>
                             {s.revokedAt ? (
-                              <Badge variant="danger">revoked</Badge>
+                              <Badge variant="danger">di-revoke</Badge>
                             ) : (
-                              <Badge variant="success">active</Badge>
+                              <Badge variant="success">aktif</Badge>
                             )}
                           </div>
                           <p className="text-xs text-slate-500">
@@ -618,11 +767,11 @@ export function ArchiveDetailClient({
                             {s.signatoryUnit && ` · ${s.signatoryUnit}`}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
-                            Signed at {formatDateTime(s.signedAt)}
+                            Ditandatangani {formatDateTime(s.signedAt)}
                           </p>
                           {s.revokedAt && (
                             <p className="mt-1 text-xs text-red-700">
-                              Revoked at {formatDateTime(s.revokedAt)}
+                              Di-revoke {formatDateTime(s.revokedAt)}
                               {s.revokedReason && ` — ${s.revokedReason}`}
                             </p>
                           )}
@@ -637,12 +786,12 @@ export function ArchiveDetailClient({
                       {!s.revokedAt && (
                         <div className="mt-3 space-y-2">
                           <Label htmlFor={`reason-${s.id}`} className="text-xs">
-                            Revoke this signature (super-admin)
+                            Revoke tanda tangan ini (super-admin)
                           </Label>
                           <div className="flex flex-wrap gap-2">
                             <Input
                               id={`reason-${s.id}`}
-                              placeholder="Reason (required)"
+                              placeholder="Alasan (wajib)"
                               value={revokeReason[s.id] ?? ""}
                               onChange={(e) =>
                                 setRevokeReason((prev) => ({
@@ -658,7 +807,7 @@ export function ArchiveDetailClient({
                               disabled={revokingId === s.id}
                               onClick={() => revokeSignature(s.id)}
                             >
-                              {revokingId === s.id ? "Revoking…" : "Revoke"}
+                              {revokingId === s.id ? "Mer-revoke…" : "Revoke"}
                             </Button>
                           </div>
                         </div>
@@ -670,12 +819,12 @@ export function ArchiveDetailClient({
 
               {signatories.length === 0 ? (
                 <p className="text-sm text-amber-700">
-                  No active signatory available. Add one in the Signatories
-                  page first.
+                  Belum ada signatory aktif. Tambahkan di halaman
+                  Signatories terlebih dahulu.
                 </p>
               ) : (
                 <div className="rounded border border-dashed border-slate-300 p-3">
-                  <Label htmlFor="adHocSignatory">Add a signature</Label>
+                  <Label htmlFor="adHocSignatory">Tambah tanda tangan</Label>
                   <div className="mt-1 flex flex-wrap gap-2">
                     <select
                       id="adHocSignatory"
@@ -690,12 +839,13 @@ export function ArchiveDetailClient({
                       ))}
                     </select>
                     <Button onClick={signAdHoc} disabled={adHocBusy}>
-                      {adHocBusy ? "Signing…" : "Sign"}
+                      {adHocBusy ? "Menandatangani…" : "Tanda tangan"}
                     </Button>
                   </div>
                   <p className="mt-2 text-xs text-slate-500">
-                    Any active signatory can be added. Each signatory may only
-                    hold one active signature at a time per archive.
+                    Signatory aktif apapun bisa ditambahkan. Setiap
+                    signatory hanya boleh punya satu tanda tangan aktif
+                    per arsip.
                   </p>
                 </div>
               )}
@@ -780,7 +930,7 @@ export function ArchiveDetailClient({
                   onClick={embedPdf}
                   disabled={embedBusy || !embedFile}
                 >
-                  {embedBusy ? "Embedding\u2026" : "Embed & download"}
+                  {embedBusy ? "Menempelkan\u2026" : "Tempel & unduh"}
                 </Button>
               </CardContent>
             </Card>
@@ -790,9 +940,9 @@ export function ArchiveDetailClient({
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Verification QR</CardTitle>
+              <CardTitle>QR verifikasi</CardTitle>
               <CardDescription>
-                Embed this on the printed/PDF version of your document.
+                Tempel pada versi cetak/PDF dari dokumen.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -804,7 +954,7 @@ export function ArchiveDetailClient({
                         htmlFor="previewSig"
                         className="text-xs text-slate-500"
                       >
-                        Signature
+                        Tanda tangan
                       </Label>
                       <select
                         id="previewSig"
@@ -821,13 +971,14 @@ export function ArchiveDetailClient({
                     </div>
                   )}
                   <div className="mx-auto inline-block rounded-lg border border-slate-200 bg-white p-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <RenderedImage
                       src={`/api/archives/${archive.id}/qr?sigId=${previewSignature.id}`}
                       alt="Verification QR"
                       width={240}
                       height={240}
                       className="h-60 w-60"
+                      imgClassName="h-60 w-60"
+                      skeletonClassName="h-60 w-60"
                     />
                   </div>
                   <p className="break-all rounded bg-slate-100 p-2 text-xs">
@@ -839,7 +990,7 @@ export function ArchiveDetailClient({
                       download={`qr-${archive.number}.png`}
                     >
                       <Button size="sm" variant="outline">
-                        Download QR (PNG)
+                        Unduh QR (PNG)
                       </Button>
                     </a>
                     <a
@@ -847,7 +998,7 @@ export function ArchiveDetailClient({
                       download={`qr-${archive.number}.svg`}
                     >
                       <Button size="sm" variant="outline">
-                        Download QR (SVG)
+                        Unduh QR (SVG)
                       </Button>
                     </a>
                     <a
@@ -856,14 +1007,15 @@ export function ArchiveDetailClient({
                       rel="noreferrer"
                     >
                       <Button size="sm" variant="ghost">
-                        Open
+                        Buka
                       </Button>
                     </a>
                   </div>
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">
-                  Sign this archive first to generate a QR code.
+                  Tandatangani arsip ini terlebih dahulu untuk
+                  menghasilkan QR code.
                 </p>
               )}
             </CardContent>
@@ -874,18 +1026,18 @@ export function ArchiveDetailClient({
               <CardHeader>
                 <CardTitle>Visualisasi tanda tangan</CardTitle>
                 <CardDescription>
-                  Composite image (QR + signatory text). Paste onto the
-                  PDF/Word version of your document where the wet signature
-                  would normally go.
+                  Gambar composite (QR + teks signatory). Tempel pada
+                  versi PDF/Word dokumen di tempat tanda tangan basah
+                  biasanya berada.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="overflow-hidden rounded-lg border border-slate-200 bg-white p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <RenderedImage
                     src={`/api/archives/${archive.id}/stamp?sigId=${previewSignature.id}`}
-                    alt="Signature visualization"
-                    className="h-auto w-full"
+                    alt="Visualisasi tanda tangan"
+                    imgClassName="h-auto w-full"
+                    skeletonClassName="h-32 w-full"
                   />
                 </div>
                 <a
@@ -894,7 +1046,7 @@ export function ArchiveDetailClient({
                   className="block"
                 >
                   <Button size="sm" className="w-full">
-                    Download visualisasi (PNG)
+                    Unduh visualisasi (PNG)
                   </Button>
                 </a>
               </CardContent>
@@ -904,9 +1056,10 @@ export function ArchiveDetailClient({
           {(profile.logoUrl || profile.logoMimeType) && (
             <Card>
               <CardHeader>
-                <CardTitle>Branding preview</CardTitle>
+                <CardTitle>Preview branding</CardTitle>
                 <CardDescription>
-                  Public verification page will show this org identity.
+                  Halaman verifikasi publik akan menampilkan identitas
+                  organisasi ini.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center gap-3">
@@ -914,7 +1067,7 @@ export function ArchiveDetailClient({
                 <div>
                   <p className="font-medium">{profile.name}</p>
                   <p className="text-xs text-slate-500">
-                    Brand color{" "}
+                    Warna brand{" "}
                     <span
                       className="ml-1 inline-block h-3 w-3 rounded"
                       style={{ backgroundColor: profile.primaryColor }}
@@ -955,11 +1108,11 @@ function archiveStatusBadge(status: ArchiveStatus): {
     case "DRAFT":
       return { label: "draft", variant: "default" };
     case "PENDING":
-      return { label: "pending", variant: "warning" };
+      return { label: "menunggu", variant: "warning" };
     case "FULLY_SIGNED":
-      return { label: "signed", variant: "success" };
+      return { label: "tertandatangani", variant: "success" };
     case "REVOKED":
-      return { label: "revoked", variant: "danger" };
+      return { label: "di-revoke", variant: "danger" };
   }
 }
 

@@ -99,7 +99,7 @@ export function ArchivesClient({
     setBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
-      toast.error(data?.error || "Could not create archive");
+      toast.error(data?.error || "Gagal membuat arsip");
       return;
     }
     const created = await res.json();
@@ -125,7 +125,7 @@ export function ArchivesClient({
     });
     setRequiredIds([]);
     setCreating(false);
-    toast.success("Archive created");
+    toast.success("Arsip dibuat");
     router.refresh();
   }
 
@@ -147,7 +147,7 @@ export function ArchivesClient({
         `/api/archives?${buildQuery(archives.length, pageSize, query)}`
       );
       if (!res.ok) {
-        toast.error("Could not load more archives");
+        toast.error("Gagal memuat data tambahan");
         return;
       }
       const data = await res.json();
@@ -171,7 +171,7 @@ export function ArchivesClient({
     try {
       const res = await fetch(`/api/archives?${buildQuery(0, pageSize, q)}`);
       if (!res.ok) {
-        toast.error("Could not run search");
+        toast.error("Pencarian gagal");
         return;
       }
       const data = await res.json();
@@ -197,19 +197,19 @@ export function ArchivesClient({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold">Archives</h1>
+          <h1 className="text-2xl font-semibold">Arsip</h1>
           <p className="text-sm text-slate-500">
-            Documents that can be signed and verified by QR.
+            Dokumen yang bisa ditandatangani dan diverifikasi via QR.
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Showing {archives.length} of {total}
+            Menampilkan {archives.length} dari {total}
           </p>
         </div>
         <Button
           onClick={() => setCreating((v) => !v)}
           className="shrink-0"
         >
-          {creating ? "Cancel" : "New archive"}
+          {creating ? "Batal" : "Arsip baru"}
         </Button>
       </div>
 
@@ -222,12 +222,12 @@ export function ArchivesClient({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by number or subject…"
-          aria-label="Search archives"
+          placeholder="Cari berdasarkan nomor atau perihal…"
+          aria-label="Cari arsip"
           className="min-w-[200px] flex-1"
         />
         <Button type="submit" variant="outline" disabled={searching}>
-          {searching ? "Searching…" : "Search"}
+          {searching ? "Mencari…" : "Cari"}
         </Button>
         {query && (
           <Button
@@ -236,7 +236,7 @@ export function ArchivesClient({
             onClick={clearSearch}
             disabled={searching}
           >
-            Clear
+            Bersihkan
           </Button>
         )}
       </form>
@@ -244,26 +244,26 @@ export function ArchivesClient({
       {creating && (
         <Card>
           <CardHeader>
-            <CardTitle>New archive</CardTitle>
+            <CardTitle>Arsip baru</CardTitle>
             <CardDescription>
-              Enter the document metadata. You&apos;ll be able to sign it on the
-              detail page.
+              Masukkan metadata dokumen. Tanda tangan bisa dilakukan di
+              halaman detail.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <Label htmlFor="number">Document number *</Label>
+                <Label htmlFor="number">Nomor dokumen *</Label>
                 <Input
                   id="number"
                   required
                   value={form.number}
                   onChange={(e) => setForm({ ...form, number: e.target.value })}
-                  placeholder="e.g. 001/UNIGA/REK/I/2025"
+                  placeholder="misal 001/UNIGA/REK/I/2025"
                 />
               </div>
               <div>
-                <Label htmlFor="issuedAt">Issued at *</Label>
+                <Label htmlFor="issuedAt">Tanggal terbit *</Label>
                 <Input
                   id="issuedAt"
                   type="date"
@@ -276,17 +276,17 @@ export function ArchivesClient({
               </div>
             </div>
             <div>
-              <Label htmlFor="subject">Subject *</Label>
+              <Label htmlFor="subject">Perihal *</Label>
               <Input
                 id="subject"
                 required
                 value={form.subject}
                 onChange={(e) => setForm({ ...form, subject: e.target.value })}
-                placeholder="Perihal / subject of the letter"
+                placeholder="Perihal surat / dokumen"
               />
             </div>
             <div>
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">Deskripsi</Label>
               <Textarea
                 id="description"
                 rows={3}
@@ -298,20 +298,20 @@ export function ArchivesClient({
             </div>
             <div className="space-y-2">
               <div className="flex items-baseline justify-between gap-2">
-                <Label>Required signers (optional)</Label>
+                <Label>Signer wajib (opsional)</Label>
                 <p className="text-xs text-slate-500">
                   {requiredIds.length
-                    ? `${requiredIds.length} selected`
-                    : "Leave blank for ad-hoc signing"}
+                    ? `${requiredIds.length} dipilih`
+                    : "Kosongkan untuk ad-hoc signing"}
                 </p>
               </div>
               {signatories.length === 0 ? (
                 <p className="text-xs text-amber-700">
-                  No signatories available. Add some in the{" "}
+                  Belum ada signatory. Tambahkan terlebih dahulu di{" "}
                   <Link href="/dashboard/signatories" className="underline">
                     Signatories
-                  </Link>{" "}
-                  page first.
+                  </Link>
+                  .
                 </p>
               ) : (
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-2">
@@ -338,16 +338,17 @@ export function ArchivesClient({
                 </div>
               )}
               <p className="text-xs text-slate-500">
-                Required signers must each sign before the archive is
+                Setiap signer wajib harus menandatangani sebelum arsip
+                berstatus
                 <span className="mx-1 font-medium text-emerald-700">
                   FULLY_SIGNED
                 </span>
-                . Until then the archive stays
+                . Sampai itu terpenuhi, arsip tetap berstatus
                 <span className="mx-1 font-medium text-amber-700">PENDING</span>.
               </p>
             </div>
             <Button onClick={create} disabled={busy}>
-              {busy ? "Creating…" : "Create archive"}
+              {busy ? "Membuat…" : "Buat arsip"}
             </Button>
           </CardContent>
         </Card>
@@ -357,7 +358,7 @@ export function ArchivesClient({
         <CardContent className="p-0">
           {archives.length === 0 ? (
             <p className="p-6 text-sm text-slate-500">
-              No archives yet. Create one to start signing.
+              Belum ada arsip. Buat arsip baru untuk mulai menandatangani.
             </p>
           ) : (
             <ul className="divide-y divide-slate-100">
@@ -388,16 +389,16 @@ export function ArchivesClient({
                         <Badge variant={status.variant}>{status.label}</Badge>
                         {requiredCount > 0 && (
                           <span className="text-xs text-slate-500">
-                            {signedRequired}/{requiredCount} required signers
+                            {signedRequired}/{requiredCount} signer wajib
                           </span>
                         )}
                       </div>
                       <p className="truncate text-sm text-slate-700">{a.subject}</p>
                       <p className="text-xs text-slate-500">
-                        Issued {formatDate(a.issuedAt)}
+                        Diterbitkan {formatDate(a.issuedAt)}
                         {active && (
                           <>
-                            {" · signed by "}
+                            {" · ditandatangani oleh "}
                             <span className="font-medium">
                               {active.signatoryName}
                             </span>{" "}
@@ -408,7 +409,7 @@ export function ArchivesClient({
                     </div>
                     <Link href={`/dashboard/archives/${a.id}`}>
                       <Button variant="outline" size="sm">
-                        Open
+                        Buka
                       </Button>
                     </Link>
                   </li>
@@ -427,18 +428,18 @@ export function ArchivesClient({
             onClick={loadMore}
             disabled={loadingMore}
           >
-            {loadingMore ? "Loading…" : "Load more"}
+            {loadingMore ? "Memuat…" : "Muat lebih banyak"}
           </Button>
         </div>
       )}
 
       {signatories.length === 0 && (
         <p className="text-xs text-amber-700">
-          Tip: add at least one signatory in{" "}
+          Tip: tambahkan minimal satu signatory di{" "}
           <Link href="/dashboard/signatories" className="underline">
             Signatories
           </Link>{" "}
-          before trying to sign an archive.
+          sebelum menandatangani arsip.
         </p>
       )}
     </div>
@@ -453,7 +454,7 @@ function archiveStatusBadge(status: ArchiveStatus): {
     case "DRAFT":
       return { label: "draft", variant: "default" };
     case "PENDING":
-      return { label: "pending", variant: "warning" };
+      return { label: "menunggu", variant: "warning" };
     case "FULLY_SIGNED":
       return { label: "signed", variant: "success" };
     case "REVOKED":
