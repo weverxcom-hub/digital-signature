@@ -14,6 +14,7 @@ export async function GET(_req: Request, { params }: { params: { token: string }
           subject: true,
           description: true,
           issuedAt: true,
+          documentSha256: true,
         },
       },
     },

@@ -20,7 +20,7 @@ export default async function HomePage() {
           background: `linear-gradient(135deg, ${profile.primaryColor}, #0b1220)`,
         }}
       >
-        <div className="mx-auto max-w-5xl px-6 py-20">
+        <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-20">
           <div className="flex items-center gap-4">
             <LogoMark
               profile={profile}
@@ -36,7 +36,7 @@ export default async function HomePage() {
             </div>
           </div>
 
-          <h2 className="mt-12 max-w-2xl text-4xl font-bold leading-tight text-balance">
+          <h2 className="mt-10 max-w-2xl text-balance text-3xl font-bold leading-tight sm:mt-12 sm:text-4xl">
             Sign your documents digitally,{" "}
             <span className="opacity-80">verify them publicly.</span>
           </h2>
@@ -64,7 +64,10 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section id="how-it-works" className="mx-auto max-w-5xl px-6 py-16">
+      <section
+        id="how-it-works"
+        className="mx-auto max-w-5xl px-4 py-12 sm:px-6 sm:py-16"
+      >
         <h3 className="text-2xl font-semibold">How verification works</h3>
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           <Step

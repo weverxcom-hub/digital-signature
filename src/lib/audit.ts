@@ -8,6 +8,7 @@ export type AuditAction =
   | "SIGN"
   | "SIGN_REVOKE"
   | "EMBED_PDF"
+  | "BIND_DOCUMENT"
   | "LOGIN"
   | "PROFILE_UPDATE"
   | "PROFILE_LOGO_UPLOAD"
