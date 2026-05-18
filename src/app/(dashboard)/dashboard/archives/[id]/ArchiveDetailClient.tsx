@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import Image from "next/image";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { LogoMark } from "@/components/LogoMark";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Textarea } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
@@ -31,6 +31,17 @@ type Signature = {
 
 type ArchiveStatus = "DRAFT" | "PENDING" | "FULLY_SIGNED" | "REVOKED";
 
+type RequiredSignatory = {
+  id: string;
+  signatoryId: string;
+  signatory: {
+    id: string;
+    name: string;
+    position: string;
+    unit: string | null;
+  };
+};
+
 type Archive = {
   id: string;
   number: string;
@@ -38,8 +49,10 @@ type Archive = {
   description: string | null;
   issuedAt: string;
   status: ArchiveStatus;
+  documentSha256: string | null;
   createdBy: { id: string; name: string; email: string };
   signatures: Signature[];
+  requiredSignatories: RequiredSignatory[];
 };
 
 type Signatory = { id: string; name: string; position: string };
@@ -48,6 +61,8 @@ type Profile = {
   name: string;
   shortName: string | null;
   logoUrl: string | null;
+  logoMimeType: string | null;
+  logoUpdatedAt: string | null;
   primaryColor: string;
 };
 
@@ -63,62 +78,125 @@ export function ArchiveDetailClient({
   profile: Profile;
 }) {
   const router = useRouter();
-  const [working, setWorking] = useState(false);
-  const [selectedSignatory, setSelectedSignatory] = useState(
+  const [busySignatoryId, setBusySignatoryId] = useState<string | null>(null);
+  const [adHocSignatoryId, setAdHocSignatoryId] = useState(
     signatories[0]?.id ?? ""
   );
-  const [revokeReason, setRevokeReason] = useState("");
-  const [revoking, setRevoking] = useState(false);
+  const [adHocBusy, setAdHocBusy] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokeReason, setRevokeReason] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
   const [form, setForm] = useState({
     number: archive.number,
     subject: archive.subject,
     description: archive.description ?? "",
     issuedAt: archive.issuedAt.slice(0, 10),
   });
-
-  // Multi-signer support landed in the schema, but UX still shows a single
-  // "primary" signature: most-recent active, else most-recent revoked.
-  const sortedSignatures = [...archive.signatures].sort(
-    (a, b) => +new Date(b.signedAt) - +new Date(a.signedAt)
+  // PDF embed state — admin uploads a PDF, server returns the stamped PDF as
+  // a download. Nothing is persisted server-side (option (a) in the plan).
+  const [embedFile, setEmbedFile] = useState<File | null>(null);
+  const [embedPage, setEmbedPage] = useState<"last" | "first" | "all">(
+    "last"
   );
-  const activeSignature = sortedSignatures.find((s) => !s.revokedAt) ?? null;
-  const primarySignature = activeSignature ?? sortedSignatures[0] ?? null;
-  const isSigned = !!activeSignature;
+  const [embedCorner, setEmbedCorner] = useState<
+    "top-left" | "top-right" | "bottom-left" | "bottom-right"
+  >("bottom-right");
+  const [embedBusy, setEmbedBusy] = useState(false);
 
-  async function sign() {
-    if (!selectedSignatory) {
-      toast.error("Pick a signatory first");
-      return;
-    }
-    setWorking(true);
+  // PDF hash binding (optional). Admin uploads a PDF, the browser computes
+  // SHA-256 client-side and the server stores only the hex digest. This is
+  // advisory — the HMAC signature is independent of it.
+  const [boundSha256, setBoundSha256] = useState<string | null>(
+    archive.documentSha256
+  );
+  const [bindComputedHash, setBindComputedHash] = useState<string | null>(null);
+  const [bindBusy, setBindBusy] = useState(false);
+  const [bindHashing, setBindHashing] = useState(false);
+
+  const sortedSignatures = useMemo(
+    () =>
+      [...archive.signatures].sort(
+        (a, b) => +new Date(b.signedAt) - +new Date(a.signedAt)
+      ),
+    [archive.signatures]
+  );
+  const activeSignatures = sortedSignatures.filter((s) => !s.revokedAt);
+  const primarySignature =
+    activeSignatures[0] ?? sortedSignatures[0] ?? null;
+  const hasAnyActiveSignature = activeSignatures.length > 0;
+
+  // Track which required signatories already have an active signature so
+  // we can show pending/signed status and offer per-signer sign buttons.
+  const requiredIdsActive = useMemo(
+    () =>
+      new Set(
+        activeSignatures.map((s) => s.signatoryId).filter(Boolean) as string[]
+      ),
+    [activeSignatures]
+  );
+
+  // Signatory selected for ad-hoc QR/stamp preview (defaults to primary).
+  const [previewSigId, setPreviewSigId] = useState<string | null>(
+    primarySignature?.id ?? null
+  );
+  const previewSignature = previewSigId
+    ? sortedSignatures.find((s) => s.id === previewSigId) ?? null
+    : primarySignature;
+  const showPreview =
+    previewSignature !== null && !previewSignature.revokedAt && !!verifyUrl;
+
+  async function signAs(signatoryId: string) {
+    setBusySignatoryId(signatoryId);
     const res = await fetch(`/api/archives/${archive.id}/sign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signatoryId: selectedSignatory }),
+      body: JSON.stringify({ signatoryId }),
     });
-    setWorking(false);
+    setBusySignatoryId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       toast.error(data?.error || "Could not sign archive");
       return;
     }
-    toast.success("Archive signed");
+    toast.success("Signature added");
     router.refresh();
   }
 
-  async function revoke() {
-    if (!revokeReason.trim()) {
+  async function signAdHoc() {
+    if (!adHocSignatoryId) {
+      toast.error("Pick a signatory first");
+      return;
+    }
+    setAdHocBusy(true);
+    const res = await fetch(`/api/archives/${archive.id}/sign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signatoryId: adHocSignatoryId }),
+    });
+    setAdHocBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error || "Could not sign archive");
+      return;
+    }
+    toast.success("Signature added");
+    router.refresh();
+  }
+
+  async function revokeSignature(signatureId: string) {
+    const reason = (revokeReason[signatureId] ?? "").trim();
+    if (!reason) {
       toast.error("Please provide a reason for revocation");
       return;
     }
-    setRevoking(true);
+    setRevokingId(signatureId);
     const res = await fetch(`/api/archives/${archive.id}/sign/revoke`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reason: revokeReason }),
+      body: JSON.stringify({ signatureId, reason }),
     });
-    setRevoking(false);
+    setRevokingId(null);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       toast.error(data?.error || "Could not revoke signature");
@@ -128,8 +206,107 @@ export function ArchiveDetailClient({
     router.refresh();
   }
 
+  async function onBindFileChange(file: File | null) {
+    setBindComputedHash(null);
+    if (!file) return;
+    setBindHashing(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
+      const hex = Array.from(new Uint8Array(digest))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+      setBindComputedHash(hex);
+    } catch {
+      toast.error("Could not compute SHA-256 in this browser");
+    } finally {
+      setBindHashing(false);
+    }
+  }
+
+  async function saveBoundHash() {
+    if (!bindComputedHash) {
+      toast.error("Pick a PDF file first to compute its hash");
+      return;
+    }
+    setBindBusy(true);
+    const res = await fetch(`/api/archives/${archive.id}/document-hash`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sha256: bindComputedHash }),
+    });
+    setBindBusy(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error || "Could not save document hash");
+      return;
+    }
+    const data = await res.json();
+    setBoundSha256(data?.documentSha256 ?? bindComputedHash);
+    setBindComputedHash(null);
+    toast.success("Document hash saved");
+    router.refresh();
+  }
+
+  async function copyBoundHash() {
+    if (!boundSha256) return;
+    try {
+      await navigator.clipboard.writeText(boundSha256);
+      toast.success("Hash copied to clipboard");
+    } catch {
+      toast.error("Clipboard not available");
+    }
+  }
+
+  async function embedPdf() {
+    if (!embedFile) {
+      toast.error("Choose a PDF file first");
+      return;
+    }
+    if (!previewSignature || previewSignature.revokedAt) {
+      toast.error("Pick an active signature to embed first");
+      return;
+    }
+    setEmbedBusy(true);
+    try {
+      const data = new FormData();
+      data.append("file", embedFile);
+      data.append("signatureId", previewSignature.id);
+      data.append("page", embedPage);
+      data.append("corner", embedCorner);
+      const res = await fetch(`/api/archives/${archive.id}/embed-pdf`, {
+        method: "POST",
+        body: data,
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        toast.error(payload?.error || "Could not embed stamp into PDF");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const fromHeader = res.headers
+        .get("Content-Disposition")
+        ?.match(/filename="([^"]+)"/)?.[1];
+      a.download =
+        fromHeader ||
+        `signed-${archive.number}-${embedFile.name.replace(/\.[^.]+$/, "")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Stamped PDF downloaded");
+    } catch {
+      toast.error("Could not embed stamp into PDF");
+    } finally {
+      setEmbedBusy(false);
+    }
+  }
+
   async function saveEdits() {
-    setWorking(true);
+    setEditBusy(true);
     const res = await fetch(`/api/archives/${archive.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -140,7 +317,7 @@ export function ArchiveDetailClient({
         issuedAt: new Date(form.issuedAt).toISOString(),
       }),
     });
-    setWorking(false);
+    setEditBusy(false);
     if (!res.ok) {
       const data = await res.json().catch(() => null);
       toast.error(data?.error || "Could not save");
@@ -150,6 +327,12 @@ export function ArchiveDetailClient({
     setEditing(false);
     router.refresh();
   }
+
+  const statusBadge = archiveStatusBadge(archive.status);
+  const requiredCount = archive.requiredSignatories.length;
+  const signedRequiredCount = archive.requiredSignatories.filter((r) =>
+    requiredIdsActive.has(r.signatoryId)
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -163,12 +346,11 @@ export function ArchiveDetailClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isSigned && <Badge variant="success">signed</Badge>}
-          {!isSigned && primarySignature?.revokedAt && (
-            <Badge variant="danger">revoked</Badge>
-          )}
-          {archive.signatures.length === 0 && (
-            <Badge variant="default">draft</Badge>
+          <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+          {requiredCount > 0 && (
+            <span className="text-xs text-slate-500">
+              {signedRequiredCount}/{requiredCount} required signers
+            </span>
           )}
         </div>
       </div>
@@ -181,12 +363,12 @@ export function ArchiveDetailClient({
                 <div>
                   <CardTitle>Document metadata</CardTitle>
                   <CardDescription>
-                    {isSigned
-                      ? "Locked while signature is active. Revoke first to edit."
+                    {hasAnyActiveSignature
+                      ? "Locked while any signature is active. Revoke all signatures first to edit."
                       : "Edit the document metadata before signing."}
                   </CardDescription>
                 </div>
-                {!isSigned &&
+                {!hasAnyActiveSignature &&
                   (editing ? (
                     <Button
                       variant="ghost"
@@ -196,7 +378,11 @@ export function ArchiveDetailClient({
                       Cancel
                     </Button>
                   ) : (
-                    <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditing(true)}
+                    >
                       Edit
                     </Button>
                   ))}
@@ -249,8 +435,8 @@ export function ArchiveDetailClient({
                       }
                     />
                   </div>
-                  <Button onClick={saveEdits} disabled={working}>
-                    {working ? "Saving…" : "Save"}
+                  <Button onClick={saveEdits} disabled={editBusy}>
+                    {editBusy ? "Saving…" : "Save"}
                   </Button>
                 </div>
               ) : (
@@ -272,106 +458,333 @@ export function ArchiveDetailClient({
 
           <Card>
             <CardHeader>
-              <CardTitle>Signature</CardTitle>
+              <CardTitle>Bind PDF (opsional)</CardTitle>
               <CardDescription>
-                {isSigned
-                  ? "This archive is signed. Anyone with the QR can verify it."
-                  : "Pick a signatory and sign the archive. A unique QR code will be generated."}
+                Catat SHA-256 file PDF di sistem agar penerima bisa
+                memverifikasi bahwa PDF yang mereka pegang identik byte-for-byte
+                dengan yang admin daftarkan. Bersifat optional &amp; advisory —
+                tidak meng-invalidate signature.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {!primarySignature && (
-                <div className="space-y-3">
-                  {signatories.length === 0 ? (
-                    <p className="text-sm text-amber-700">
-                      No active signatory available. Add one in the Signatories
-                      page first.
-                    </p>
-                  ) : (
-                    <div>
-                      <Label htmlFor="signatory">Signatory</Label>
-                      <select
-                        id="signatory"
-                        className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
-                        value={selectedSignatory}
-                        onChange={(e) => setSelectedSignatory(e.target.value)}
-                      >
-                        {signatories.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} — {s.position}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  <Button onClick={sign} disabled={working || signatories.length === 0}>
-                    {working ? "Signing…" : "Sign archive"}
-                  </Button>
+            <CardContent className="space-y-3 text-sm">
+              {boundSha256 ? (
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-500">
+                    Bound SHA-256
+                  </Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="break-all rounded bg-slate-100 px-2 py-1 font-mono text-xs">
+                      {boundSha256}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      onClick={copyBoundHash}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Penerima bisa drop PDF di halaman verifikasi untuk
+                    mengonfirmasi belum berubah. Hash tidak bisa diubah lagi
+                    — buat archive baru untuk dokumen lain.
+                  </p>
                 </div>
-              )}
-
-              {primarySignature && (
+              ) : (
                 <div className="space-y-3">
-                  <dl className="grid gap-3 text-sm md:grid-cols-2">
-                    <Field label="Signatory">
-                      {primarySignature.signatoryName}
-                    </Field>
-                    <Field label="Position">
-                      {primarySignature.signatoryPosition}
-                    </Field>
-                    {primarySignature.signatoryUnit && (
-                      <Field label="Unit">
-                        {primarySignature.signatoryUnit}
-                      </Field>
-                    )}
-                    <Field label="Signed at">
-                      {formatDateTime(primarySignature.signedAt)}
-                    </Field>
-                    <Field label="Token" wide>
-                      <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
-                        {primarySignature.token}
+                  <div>
+                    <Label htmlFor="bindPdf">PDF document</Label>
+                    <Input
+                      id="bindPdf"
+                      type="file"
+                      accept="application/pdf"
+                      onChange={(e) =>
+                        onBindFileChange(e.target.files?.[0] ?? null)
+                      }
+                    />
+                  </div>
+                  {bindHashing && (
+                    <p className="text-xs text-slate-500">Computing hash…</p>
+                  )}
+                  {bindComputedHash && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-slate-500">
+                        Computed SHA-256
+                      </Label>
+                      <code className="block break-all rounded bg-slate-100 px-2 py-1 font-mono text-xs">
+                        {bindComputedHash}
                       </code>
-                    </Field>
-                  </dl>
-                  {primarySignature.revokedAt ? (
-                    <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-                      <p className="font-medium">
-                        Revoked on{" "}
-                        {formatDateTime(primarySignature.revokedAt)}
-                      </p>
-                      {primarySignature.revokedReason && (
-                        <p className="mt-1">
-                          Reason: {primarySignature.revokedReason}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label htmlFor="revokeReason">Revoke signature</Label>
-                      <Input
-                        id="revokeReason"
-                        placeholder="Reason (required)"
-                        value={revokeReason}
-                        onChange={(e) => setRevokeReason(e.target.value)}
-                      />
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={revoke}
-                        disabled={revoking}
-                      >
-                        {revoking ? "Revoking…" : "Revoke signature"}
-                      </Button>
-                      <p className="text-xs text-slate-500">
-                        Only super-admin can revoke. The verification page will
-                        show this archive as revoked.
-                      </p>
                     </div>
                   )}
+                  <Button
+                    onClick={saveBoundHash}
+                    disabled={!bindComputedHash || bindBusy}
+                  >
+                    {bindBusy ? "Saving…" : "Compute & save hash"}
+                  </Button>
+                  <p className="text-xs text-slate-500">
+                    File tidak diupload ke server — hanya 64-char hex digest
+                    yang disimpan.
+                  </p>
                 </div>
               )}
             </CardContent>
           </Card>
+
+          {requiredCount > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Required signers</CardTitle>
+                <CardDescription>
+                  Each required signatory must sign before the archive becomes
+                  fully signed. Add or revoke signatures as needed.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y divide-slate-100">
+                  {archive.requiredSignatories.map((r) => {
+                    const signed = requiredIdsActive.has(r.signatoryId);
+                    const busy = busySignatoryId === r.signatoryId;
+                    return (
+                      <li
+                        key={r.id}
+                        className="flex flex-wrap items-center justify-between gap-3 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium">{r.signatory.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {r.signatory.position}
+                            {r.signatory.unit && ` · ${r.signatory.unit}`}
+                          </p>
+                        </div>
+                        {signed ? (
+                          <Badge variant="success">signed</Badge>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <Badge variant="warning">pending</Badge>
+                            <Button
+                              size="sm"
+                              onClick={() => signAs(r.signatoryId)}
+                              disabled={busy}
+                            >
+                              {busy ? "Signing…" : "Sign as this signer"}
+                            </Button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Signatures</CardTitle>
+              <CardDescription>
+                {sortedSignatures.length === 0
+                  ? "No signatures yet."
+                  : `${activeSignatures.length} active · ${
+                      sortedSignatures.length - activeSignatures.length
+                    } revoked`}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {sortedSignatures.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Use the section below to add a signature.
+                </p>
+              ) : (
+                <ul className="space-y-3">
+                  {sortedSignatures.map((s) => (
+                    <li
+                      key={s.id}
+                      className="rounded border border-slate-200 p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium">{s.signatoryName}</p>
+                            {s.revokedAt ? (
+                              <Badge variant="danger">revoked</Badge>
+                            ) : (
+                              <Badge variant="success">active</Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            {s.signatoryPosition}
+                            {s.signatoryUnit && ` · ${s.signatoryUnit}`}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Signed at {formatDateTime(s.signedAt)}
+                          </p>
+                          {s.revokedAt && (
+                            <p className="mt-1 text-xs text-red-700">
+                              Revoked at {formatDateTime(s.revokedAt)}
+                              {s.revokedReason && ` — ${s.revokedReason}`}
+                            </p>
+                          )}
+                          <p className="mt-1 break-all text-xs text-slate-400">
+                            Token:{" "}
+                            <code className="rounded bg-slate-100 px-1 py-0.5">
+                              {s.token}
+                            </code>
+                          </p>
+                        </div>
+                      </div>
+                      {!s.revokedAt && (
+                        <div className="mt-3 space-y-2">
+                          <Label htmlFor={`reason-${s.id}`} className="text-xs">
+                            Revoke this signature (super-admin)
+                          </Label>
+                          <div className="flex flex-wrap gap-2">
+                            <Input
+                              id={`reason-${s.id}`}
+                              placeholder="Reason (required)"
+                              value={revokeReason[s.id] ?? ""}
+                              onChange={(e) =>
+                                setRevokeReason((prev) => ({
+                                  ...prev,
+                                  [s.id]: e.target.value,
+                                }))
+                              }
+                              className="min-w-[200px] flex-1"
+                            />
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={revokingId === s.id}
+                              onClick={() => revokeSignature(s.id)}
+                            >
+                              {revokingId === s.id ? "Revoking…" : "Revoke"}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {signatories.length === 0 ? (
+                <p className="text-sm text-amber-700">
+                  No active signatory available. Add one in the Signatories
+                  page first.
+                </p>
+              ) : (
+                <div className="rounded border border-dashed border-slate-300 p-3">
+                  <Label htmlFor="adHocSignatory">Add a signature</Label>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <select
+                      id="adHocSignatory"
+                      className="block min-w-[200px] flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+                      value={adHocSignatoryId}
+                      onChange={(e) => setAdHocSignatoryId(e.target.value)}
+                    >
+                      {signatories.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} — {s.position}
+                        </option>
+                      ))}
+                    </select>
+                    <Button onClick={signAdHoc} disabled={adHocBusy}>
+                      {adHocBusy ? "Signing…" : "Sign"}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Any active signatory can be added. Each signatory may only
+                    hold one active signature at a time per archive.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {showPreview && previewSignature && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Tempel stamp ke PDF</CardTitle>
+                <CardDescription>
+                  Upload PDF dokumen aslimu. Sistem akan menempelkan QR +
+                  visualisasi tanda tangan ke halaman yang kamu pilih dan
+                  langsung mengirim PDF hasilnya untuk diunduh. PDF tidak
+                  disimpan di server.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="embedFile">PDF source (max 10 MB)</Label>
+                  <Input
+                    id="embedFile"
+                    type="file"
+                    accept="application/pdf"
+                    onChange={(e) =>
+                      setEmbedFile(e.target.files?.[0] ?? null)
+                    }
+                  />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <Label htmlFor="embedPage">Page</Label>
+                    <select
+                      id="embedPage"
+                      className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+                      value={embedPage}
+                      onChange={(e) =>
+                        setEmbedPage(
+                          e.target.value as "last" | "first" | "all"
+                        )
+                      }
+                    >
+                      <option value="last">Last page</option>
+                      <option value="first">First page</option>
+                      <option value="all">All pages</option>
+                    </select>
+                  </div>
+                  <div>
+                    <Label htmlFor="embedCorner">Corner</Label>
+                    <select
+                      id="embedCorner"
+                      className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+                      value={embedCorner}
+                      onChange={(e) =>
+                        setEmbedCorner(
+                          e.target.value as
+                            | "top-left"
+                            | "top-right"
+                            | "bottom-left"
+                            | "bottom-right"
+                        )
+                      }
+                    >
+                      <option value="bottom-right">Bottom-right</option>
+                      <option value="bottom-left">Bottom-left</option>
+                      <option value="top-right">Top-right</option>
+                      <option value="top-left">Top-left</option>
+                    </select>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Using signature:{" "}
+                  <span className="font-medium text-slate-700">
+                    {previewSignature.signatoryName}
+                  </span>
+                  {" \u00b7 "}
+                  {previewSignature.signatoryPosition}
+                  {activeSignatures.length > 1 &&
+                    " (change in the QR card above)"}
+                </p>
+                <Button
+                  onClick={embedPdf}
+                  disabled={embedBusy || !embedFile}
+                >
+                  {embedBusy ? "Embedding\u2026" : "Embed & download"}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -383,12 +796,34 @@ export function ArchiveDetailClient({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {isSigned && verifyUrl ? (
+              {showPreview && previewSignature ? (
                 <div className="space-y-3 text-center">
+                  {activeSignatures.length > 1 && (
+                    <div className="text-left">
+                      <Label
+                        htmlFor="previewSig"
+                        className="text-xs text-slate-500"
+                      >
+                        Signature
+                      </Label>
+                      <select
+                        id="previewSig"
+                        className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"
+                        value={previewSignature.id}
+                        onChange={(e) => setPreviewSigId(e.target.value)}
+                      >
+                        {activeSignatures.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.signatoryName} — {s.signatoryPosition}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div className="mx-auto inline-block rounded-lg border border-slate-200 bg-white p-3">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={`/api/archives/${archive.id}/qr`}
+                      src={`/api/archives/${archive.id}/qr?sigId=${previewSignature.id}`}
                       alt="Verification QR"
                       width={240}
                       height={240}
@@ -396,11 +831,11 @@ export function ArchiveDetailClient({
                     />
                   </div>
                   <p className="break-all rounded bg-slate-100 p-2 text-xs">
-                    {verifyUrl}
+                    {verifyUrlForToken(verifyUrl, previewSignature.token)}
                   </p>
                   <div className="flex flex-wrap justify-center gap-2">
                     <a
-                      href={`/api/archives/${archive.id}/qr`}
+                      href={`/api/archives/${archive.id}/qr?sigId=${previewSignature.id}`}
                       download={`qr-${archive.number}.png`}
                     >
                       <Button size="sm" variant="outline">
@@ -408,14 +843,18 @@ export function ArchiveDetailClient({
                       </Button>
                     </a>
                     <a
-                      href={`/api/archives/${archive.id}/qr?format=svg`}
+                      href={`/api/archives/${archive.id}/qr?sigId=${previewSignature.id}&format=svg`}
                       download={`qr-${archive.number}.svg`}
                     >
                       <Button size="sm" variant="outline">
                         Download QR (SVG)
                       </Button>
                     </a>
-                    <a href={verifyUrl} target="_blank" rel="noreferrer">
+                    <a
+                      href={verifyUrlForToken(verifyUrl, previewSignature.token)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
                       <Button size="sm" variant="ghost">
                         Open
                       </Button>
@@ -430,7 +869,7 @@ export function ArchiveDetailClient({
             </CardContent>
           </Card>
 
-          {isSigned && verifyUrl && (
+          {showPreview && previewSignature && (
             <Card>
               <CardHeader>
                 <CardTitle>Visualisasi tanda tangan</CardTitle>
@@ -444,13 +883,13 @@ export function ArchiveDetailClient({
                 <div className="overflow-hidden rounded-lg border border-slate-200 bg-white p-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`/api/archives/${archive.id}/stamp`}
+                    src={`/api/archives/${archive.id}/stamp?sigId=${previewSignature.id}`}
                     alt="Signature visualization"
                     className="h-auto w-full"
                   />
                 </div>
                 <a
-                  href={`/api/archives/${archive.id}/stamp`}
+                  href={`/api/archives/${archive.id}/stamp?sigId=${previewSignature.id}`}
                   download={`stamp-${archive.number}.png`}
                   className="block"
                 >
@@ -462,7 +901,7 @@ export function ArchiveDetailClient({
             </Card>
           )}
 
-          {profile.logoUrl && (
+          {(profile.logoUrl || profile.logoMimeType) && (
             <Card>
               <CardHeader>
                 <CardTitle>Branding preview</CardTitle>
@@ -471,14 +910,7 @@ export function ArchiveDetailClient({
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex items-center gap-3">
-                <Image
-                  src={profile.logoUrl}
-                  alt={profile.name}
-                  width={48}
-                  height={48}
-                  className="h-12 w-12 rounded object-contain"
-                  unoptimized
-                />
+                <LogoMark profile={profile} size={48} />
                 <div>
                   <p className="font-medium">{profile.name}</p>
                   <p className="text-xs text-slate-500">
@@ -513,4 +945,33 @@ function Field({
       <dd className="mt-0.5 text-sm text-slate-900">{children}</dd>
     </div>
   );
+}
+
+function archiveStatusBadge(status: ArchiveStatus): {
+  label: string;
+  variant: "default" | "success" | "warning" | "danger" | "info";
+} {
+  switch (status) {
+    case "DRAFT":
+      return { label: "draft", variant: "default" };
+    case "PENDING":
+      return { label: "pending", variant: "warning" };
+    case "FULLY_SIGNED":
+      return { label: "signed", variant: "success" };
+    case "REVOKED":
+      return { label: "revoked", variant: "danger" };
+  }
+}
+
+/**
+ * The server-side primary verify URL is computed for the primary signature
+ * only. Rebuild for the selected preview signature by swapping the trailing
+ * token segment.
+ */
+function verifyUrlForToken(
+  primaryVerifyUrl: string | null,
+  token: string
+): string {
+  if (!primaryVerifyUrl) return "";
+  return primaryVerifyUrl.replace(/\/verify\/[^/]+$/, `/verify/${token}`);
 }

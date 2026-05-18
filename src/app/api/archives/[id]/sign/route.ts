@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -25,80 +26,125 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     );
   }
 
-  const archive = await prisma.archive.findUnique({
-    where: { id: params.id },
-    include: { signatures: true },
-  });
-  if (!archive) {
-    return NextResponse.json({ error: "Archive not found" }, { status: 404 });
-  }
-  // Preserve single-signer behaviour at MVP: block while any active
-  // signature exists. Schema supports 1:N for the future.
-  const hasActiveSignature = archive.signatures.some((s) => !s.revokedAt);
-  if (hasActiveSignature) {
-    return NextResponse.json(
-      { error: "This archive is already signed. Revoke the existing signature first." },
-      { status: 409 }
+  let result;
+  try {
+    result = await prisma.$transaction(
+      async (tx) => {
+        const archive = await tx.archive.findUnique({
+          where: { id: params.id },
+          include: {
+            signatures: true,
+            requiredSignatories: { select: { signatoryId: true } },
+          },
+        });
+        if (!archive) {
+          throw new Response(JSON.stringify({ error: "Archive not found" }), {
+            status: 404,
+          });
+        }
+        const hasActiveDuplicate = archive.signatures.some(
+          (s) => s.signatoryId === parsed.data.signatoryId && !s.revokedAt
+        );
+        if (hasActiveDuplicate) {
+          throw new Response(
+            JSON.stringify({
+              error:
+                "This signatory already has an active signature on this archive. Revoke it before re-signing.",
+            }),
+            { status: 409 }
+          );
+        }
+        const signatory = await tx.signatory.findUnique({
+          where: { id: parsed.data.signatoryId },
+        });
+        if (!signatory || signatory.deletedAt || !signatory.active) {
+          throw new Response(
+            JSON.stringify({ error: "Signatory not found or inactive" }),
+            { status: 400 }
+          );
+        }
+
+        const token = generateSignatureToken();
+        const signedAt = new Date();
+        const hmac = computeSignatureHmac(
+          {
+            archiveId: archive.id,
+            number: archive.number,
+            subject: archive.subject,
+            issuedAt: archive.issuedAt,
+            signatoryId: signatory.id,
+            signatoryName: signatory.name,
+            signatoryPosition: signatory.position,
+            signedAt,
+          },
+          token
+        );
+
+        const created = await tx.archiveSignature.create({
+          data: {
+            archiveId: archive.id,
+            signatoryId: signatory.id,
+            signatoryName: signatory.name,
+            signatoryPosition: signatory.position,
+            signatoryUnit: signatory.unit,
+            token,
+            hmac,
+            signedById: session.user.id,
+            signedAt,
+          },
+        });
+
+        const signatures = await tx.archiveSignature.findMany({
+          where: { archiveId: archive.id },
+        });
+        const requiredIds = archive.requiredSignatories.map((r) => r.signatoryId);
+        await tx.archive.update({
+          where: { id: archive.id },
+          data: { status: deriveArchiveStatus(signatures, requiredIds) },
+        });
+
+        return {
+          signature: created,
+          audit: {
+            entityId: archive.id,
+            metadata: {
+              signatoryId: signatory.id,
+              signatoryName: signatory.name,
+              token,
+            },
+          },
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
+  } catch (err) {
+    if (err instanceof Response) return err;
+    const errorCode =
+      typeof err === "object" && err !== null && "code" in err
+        ? (err as { code?: string }).code
+        : undefined;
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      (errorCode === "P2002" || errorCode === "P2034")
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "This signatory already has an active signature on this archive. Revoke it before re-signing.",
+        },
+        { status: 409 }
+      );
+    }
+    throw err;
   }
-  const signatory = await prisma.signatory.findUnique({
-    where: { id: parsed.data.signatoryId },
-  });
-  if (!signatory || signatory.deletedAt || !signatory.active) {
-    return NextResponse.json(
-      { error: "Signatory not found or inactive" },
-      { status: 400 }
-    );
-  }
-
-  const token = generateSignatureToken();
-  const signedAt = new Date();
-  const hmac = computeSignatureHmac(
-    {
-      archiveId: archive.id,
-      number: archive.number,
-      subject: archive.subject,
-      issuedAt: archive.issuedAt,
-      signatoryId: signatory.id,
-      signatoryName: signatory.name,
-      signatoryPosition: signatory.position,
-      signedAt,
-    },
-    token
-  );
-
-  const signature = await prisma.archiveSignature.create({
-    data: {
-      archiveId: archive.id,
-      signatoryId: signatory.id,
-      signatoryName: signatory.name,
-      signatoryPosition: signatory.position,
-      signatoryUnit: signatory.unit,
-      token,
-      hmac,
-      signedById: session.user.id,
-      signedAt,
-    },
-  });
-
-  await prisma.archive.update({
-    where: { id: archive.id },
-    data: {
-      status: deriveArchiveStatus([...archive.signatures, signature]),
-    },
-  });
 
   await logAudit({
     action: "SIGN",
     entityType: "Archive",
-    entityId: archive.id,
+    entityId: result.audit.entityId,
     userId: session.user.id,
-    metadata: {
-      signatoryId: signatory.id,
-      signatoryName: signatory.name,
-      token,
-    },
+    metadata: result.audit.metadata,
   });
 
-  return NextResponse.json(signature, { status: 201 });
+  return NextResponse.json(result.signature, { status: 201 });
 }
