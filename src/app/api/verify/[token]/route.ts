@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifySignatureHmac } from "@/lib/signature";
 import { getOrCreateOrganizationProfile, getLogoSrc } from "@/lib/profile";
+import { rateLimitByIp } from "@/lib/rateLimit";
 
-export async function GET(_req: Request, { params }: { params: { token: string } }) {
+export async function GET(req: Request, { params }: { params: { token: string } }) {
+  const rl = await rateLimitByIp(req, "verifyApi");
+  if (rl) return rl;
+
   const sig = await prisma.archiveSignature.findUnique({
     where: { token: params.token },
     include: {

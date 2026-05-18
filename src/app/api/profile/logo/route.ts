@@ -4,6 +4,7 @@ import { authOptions, isAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { DEFAULT_PROFILE_ID } from "@/lib/profile";
 import { logAudit } from "@/lib/audit";
+import { rateLimitByUser } from "@/lib/rateLimit";
 
 // Max upload size for the organization logo. Logos are decorative and small
 // (typically <50KB); a 2MB ceiling is generous and protects the DB row.
@@ -85,6 +86,8 @@ export async function POST(req: Request) {
   if (!session?.user || !isAdmin(session.user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const rl = await rateLimitByUser(req, "profileLogo", session.user.id);
+  if (rl) return rl;
 
   let form: FormData;
   try {
@@ -158,11 +161,13 @@ export async function POST(req: Request) {
  * removing the upload simply falls back to that URL (if set) or the
  * text-initial placeholder.
  */
-export async function DELETE() {
+export async function DELETE(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user || !isAdmin(session.user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const rl = await rateLimitByUser(req, "profileLogo", session.user.id);
+  if (rl) return rl;
 
   await prisma.organizationProfile.update({
     where: { id: DEFAULT_PROFILE_ID },

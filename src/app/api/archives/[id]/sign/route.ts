@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
 import { computeSignatureHmac, generateSignatureToken } from "@/lib/signature";
 import { deriveArchiveStatus } from "@/lib/archiveSignature";
+import { rateLimitByUser } from "@/lib/rateLimit";
 
 const signSchema = z.object({
   signatoryId: z.string().min(1),
@@ -17,6 +18,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!session?.user || !isAdmin(session.user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const rl = await rateLimitByUser(req, "archiveSign", session.user.id);
+  if (rl) return rl;
   const body = await req.json().catch(() => null);
   const parsed = signSchema.safeParse(body);
   if (!parsed.success) {
