@@ -46,12 +46,36 @@ export async function GET(req: Request) {
 
   const lastModified = meta.logoUpdatedAt.toUTCString();
   const ifModifiedSince = req.headers.get("if-modified-since");
+
+  // Defense-in-depth headers when the logo is served as a standalone
+  // document. SVG can contain <script> tags that execute when the user
+  // navigates to the URL directly (browsers do NOT execute scripts inside
+  // SVG loaded via <img src>, but they DO for direct navigation). The CSP
+  // pins resources to data/blob only and forbids script, object, and frame
+  // resources entirely. `sandbox` strips DOM origin privileges as well.
+  //
+  // For raster formats the CSP is harmless overhead but keeps headers
+  // uniform regardless of the uploaded type.
+  const securityHeaders: Record<string, string> = {
+    "Content-Security-Policy":
+      "default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; sandbox",
+    "X-Content-Type-Options": "nosniff",
+    // Force the browser to render the response in a way consistent with the
+    // declared content-type, never as an inline document inside a parent
+    // page. Most uses are <img src>, which ignores this header.
+    "Cross-Origin-Resource-Policy": "same-site",
+    // Block downloads from masquerading as something else. Filename is
+    // generic; the actual extension comes from the MIME type.
+    "Content-Disposition": "inline; filename=\"logo\"",
+  };
+
   if (ifModifiedSince && ifModifiedSince === lastModified) {
     return new NextResponse(null, {
       status: 304,
       headers: {
         "Last-Modified": lastModified,
         "Cache-Control": "public, max-age=86400, must-revalidate",
+        ...securityHeaders,
       },
     });
   }
@@ -73,6 +97,7 @@ export async function GET(req: Request) {
       // whenever the admin uploads a new logo.
       "Cache-Control": "public, max-age=86400, must-revalidate",
       "Last-Modified": lastModified,
+      ...securityHeaders,
     },
   });
 }
@@ -123,6 +148,33 @@ export async function POST(req: Request) {
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());
+
+  // SVG content sanity check. Even with strict CSP on the serve path, we
+  // reject obvious script and event-handler payloads here so a future
+  // admin who navigates straight to the logo URL on a browser with broken
+  // CSP support is still safe. Conservative: just deny script-y patterns.
+  if (file.type === "image/svg+xml") {
+    const svgText = bytes.toString("utf8");
+    const dangerous = [
+      /<script[\s>]/i,
+      /<foreignobject[\s>]/i,
+      /\son\w+\s*=/i, // onload=, onclick=, etc.
+      /javascript:/i,
+      /<!entity/i, // XXE-style entity declarations
+    ];
+    for (const pat of dangerous) {
+      if (pat.test(svgText)) {
+        return NextResponse.json(
+          {
+            error:
+              "SVG rejected: contains script, event handler, or external entity. Re-export the logo from a vector editor without scripts.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+  }
+
   const now = new Date();
 
   await prisma.organizationProfile.upsert({
