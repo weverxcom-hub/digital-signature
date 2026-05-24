@@ -1,3 +1,5 @@
+import { withSentryConfig } from "@sentry/nextjs";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Ensure the bundled stamp fonts ship with the serverless functions
@@ -14,6 +16,9 @@ const nextConfig = {
       "/api/archives/[id]/qr": ["./public/fonts/**"],
       "/api/archives/[id]/embed-pdf": ["./public/fonts/**"],
     },
+    // Required in Next.js 14 to enable src/instrumentation.ts. The flag
+    // is implicit / removed in Next.js 15.
+    instrumentationHook: true,
   },
   images: {
     // The dashboard now serves the org logo as an uploaded file via
@@ -72,4 +77,23 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+// Wrap the config with Sentry's source-map upload + automatic
+// instrumentation. When SENTRY_AUTH_TOKEN is absent (e.g. local dev,
+// preview without secrets) the wrapper still applies the runtime
+// instrumentation but skips the source-map upload step gracefully.
+export default withSentryConfig(nextConfig, {
+  // Org + project slugs only matter for source-map upload at build
+  // time. Reading from env vars keeps this file generic across forks.
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  // Don't fail the build if the source-map upload fails. We'd rather
+  // ship a deployment without symbolicated traces than block the
+  // release on a Sentry config glitch.
+  errorHandler: (err) => {
+    // eslint-disable-next-line no-console
+    console.warn("[sentry] source-map upload skipped:", err.message);
+  },
+  // Hide sentry-cli output unless debugging.
+  silent: process.env.CI !== "true",
+});
