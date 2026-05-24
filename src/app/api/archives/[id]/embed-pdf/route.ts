@@ -11,6 +11,7 @@ import {
 import { renderSignatureStamp } from "@/lib/stamp";
 import { pickPrimarySignature } from "@/lib/archiveSignature";
 import { logAudit } from "@/lib/audit";
+import { rateLimitByUser } from "@/lib/rateLimit";
 
 // pdf-lib + sharp need the Node runtime; the default is fine but be explicit
 // so a future refactor doesn't accidentally flip this route to edge.
@@ -56,6 +57,8 @@ export async function POST(
   if (!session?.user || !isAdmin(session.user.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const rl = await rateLimitByUser(req, "archiveEmbedPdf", session.user.id);
+  if (rl) return rl;
 
   let form: FormData;
   try {
