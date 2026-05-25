@@ -4,7 +4,7 @@
 > this repo. Update the "Latest update" section below + relevant subsections
 > any time you ship a meaningful change.
 
-**Latest update**: 2026-05-24 — All 4 hardening PRs (#12 SVG, #13 Vitest, #14 Sentry, demo #1) merged to `main`. Production `sign.unigamalang.ac.id` live with everything green. See [Recent activity](#recent-activity).
+**Latest update**: 2026-05-25 — PR #16 fixes a header-rule ordering bug so `/verify` now returns `X-Frame-Options: DENY` (was `SAMEORIGIN` due to a generic rule running last and overriding the specific rule). All 6 hardening PRs (#12 SVG, #13 Vitest, #14 Sentry, demo #1, #15 PROJECT_STATUS, #16 header order) merged to `main`. Production `sign.unigamalang.ac.id` live with everything green. See [Recent activity](#recent-activity).
 
 ---
 
@@ -249,6 +249,8 @@ Most recent PRs (top = newest):
 
 | PR | Title | Merged | Notes |
 |---|---|---|---|
+| [#16](https://github.com/weverxcom-hub/digital-signature/pull/16) | Fix `/verify` header rule order | 2026-05-25 | Header rule order: generic before specific, so `X-Frame-Options: DENY` on `/verify/*` wins. CSP `frame-ancestors 'none'` was already enforced. |
+| [#15](https://github.com/weverxcom-hub/digital-signature/pull/15) | Add PROJECT_STATUS.md handoff document | 2026-05-25 | This file. |
 | [#14](https://github.com/weverxcom-hub/digital-signature/pull/14) | Sentry error tracking (server + edge + client) | 2026-05-24 | No-op until `SENTRY_DSN` env var set. `withSentryConfig` wraps `next.config.mjs`. Replay 5% + 100% on error with `maskAllInputs` + `blockAllMedia`. |
 | [#13](https://github.com/weverxcom-hub/digital-signature/pull/13) | Vitest suite (50 tests) + CI workflow sample | 2026-05-24 | 4 test files. CI yaml shipped to `docs/` (needs manual move to `.github/workflows/`). |
 | [#12](https://github.com/weverxcom-hub/digital-signature/pull/12) | SVG hardening (CSP + content sanitize) | 2026-05-24 | 2-layer defense on `/api/profile/logo` |
