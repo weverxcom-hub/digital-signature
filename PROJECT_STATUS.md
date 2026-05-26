@@ -239,7 +239,7 @@ None.
 - **No CSRF tokens beyond NextAuth's defaults** — all mutating routes are guarded by session presence + same-origin; for higher-stakes routes consider adding a CSRF middleware
 - **No 2FA / WebAuthn** — single-factor (password) auth only
 - **No PDF document storage** — embed-PDF streams the result and discards the original. By design; reconsider if user requirements change.
-- **No GitHub Actions CI** — file exists in `docs/ci-workflow-sample.yml`, **needs manual copy to `.github/workflows/test.yml`** via GitHub UI (Devin's PAT lacks `workflow` scope)
+- **GitHub Actions CI active** — `.github/workflows/test.yml` runs lint + typecheck + 50 Vitest tests on every PR and every push to `main`. Sample copy preserved at `docs/ci-workflow-sample.yml` for documentation.
 - **No source-map upload to Sentry** — `SENTRY_AUTH_TOKEN` not set; errors will show minified stack traces
 - **No i18n extraction** — Indonesian + English strings hardcoded throughout (`docs/PANDUAN.md` is Indonesian, code is English)
 
@@ -249,10 +249,12 @@ Most recent PRs (top = newest):
 
 | PR | Title | Merged | Notes |
 |---|---|---|---|
-| [#16](https://github.com/weverxcom-hub/digital-signature/pull/16) | Fix `/verify` header rule order | 2026-05-25 | Header rule order: generic before specific, so `X-Frame-Options: DENY` on `/verify/*` wins. CSP `frame-ancestors 'none'` was already enforced. |
+| [#18](https://github.com/weverxcom-hub/digital-signature/pull/18) | Activate GitHub Actions CI (`.github/workflows/test.yml`) | 2026-05-26 | Lint + typecheck + 50 unit tests on every PR + push to `main`. Sample at `docs/ci-workflow-sample.yml` kept for documentation. |
+| [#17](https://github.com/weverxcom-hub/digital-signature/pull/17) | Refresh PROJECT_STATUS.md after PR #16 | 2026-05-25 | Doc refresh. |
+| [#16](https://github.com/weverxcom-hub/digital-signature/pull/16) | Fix `/verify` X-Frame-Options header order (DENY) | 2026-05-25 | Header rule order in `next.config.mjs`: general first, specific last. CSP `frame-ancestors 'none'` was already enforced. |
 | [#15](https://github.com/weverxcom-hub/digital-signature/pull/15) | Add PROJECT_STATUS.md handoff document | 2026-05-25 | This file. |
 | [#14](https://github.com/weverxcom-hub/digital-signature/pull/14) | Sentry error tracking (server + edge + client) | 2026-05-24 | No-op until `SENTRY_DSN` env var set. `withSentryConfig` wraps `next.config.mjs`. Replay 5% + 100% on error with `maskAllInputs` + `blockAllMedia`. |
-| [#13](https://github.com/weverxcom-hub/digital-signature/pull/13) | Vitest suite (50 tests) + CI workflow sample | 2026-05-24 | 4 test files. CI yaml shipped to `docs/` (needs manual move to `.github/workflows/`). |
+| [#13](https://github.com/weverxcom-hub/digital-signature/pull/13) | Vitest suite (50 tests) + CI workflow sample | 2026-05-24 | 4 test files. CI yaml originally shipped to `docs/`, activated at `.github/workflows/test.yml` in PR #18. |
 | [#12](https://github.com/weverxcom-hub/digital-signature/pull/12) | SVG hardening (CSP + content sanitize) | 2026-05-24 | 2-layer defense on `/api/profile/logo` |
 | [#11](https://github.com/weverxcom-hub/digital-signature/pull/11) | Rate-limit auth + heavy routes via Upstash Redis | 2026-05-23 | 5 buckets. Smoke-tested in prod (verify endpoint trips at request 121). |
 | [#10](https://github.com/weverxcom-hub/digital-signature/pull/10) | Sync PR for main rebranding (no-op) | 2026-05-23 | Brought `main` up to date with `devin/1778530409-initial-scaffold` (5-day split-brain fix). GitHub default branch + Vercel production branch now both `main`. |
@@ -288,7 +290,6 @@ For the up-to-date list with diffs: https://github.com/weverxcom-hub/digital-sig
 
 ### User actions
 
-- [ ] **Move `docs/ci-workflow-sample.yml` → `.github/workflows/test.yml`** via the GitHub web UI to enable PR-level CI checks (PAT used by Devin lacks `workflow` scope). Until done, Vercel preview builds are the only CI guard.
 - [ ] **(Optional) Set `SENTRY_DSN` + `NEXT_PUBLIC_SENTRY_DSN`** in Vercel env vars to activate error tracking. Create a free Next.js project at https://sentry.io → Settings → Client Keys (DSN). Wire to both Production + Preview targets.
 - [ ] **(Optional) Set `SENTRY_AUTH_TOKEN` + `SENTRY_ORG` + `SENTRY_PROJECT`** for symbolicated stack traces (source-map upload).
 - [ ] **(Optional) Add `digital-signature-demo` to the Devin GitHub App installation** at https://github.com/settings/installations → Devin AI → Configure → add the demo repo. This unblocks normal `git push` for the demo repo (currently requires REST API workaround).
@@ -405,7 +406,8 @@ sentry.{server,edge,client}.config.ts      # Sentry runtime init
 next.config.mjs                            # Headers + Sentry wrapper
 .env.example                               # All env vars documented
 docs/PANDUAN.md                            # End-user guide (Indonesian)
-docs/ci-workflow-sample.yml                # GitHub Actions CI (needs manual install)
+.github/workflows/test.yml                 # GitHub Actions CI (lint + typecheck + tests)
+docs/ci-workflow-sample.yml                # Same content as above, kept for documentation
 public/fonts/Inter-Regular.ttf, -Bold.ttf  # Bundled fonts for stamp rendering
 PROJECT_STATUS.md                          # This file
 ```
